@@ -76,6 +76,12 @@ DEFAULT_CONDUCTOR_MAP = {
     "989 8318 8454": "Sukhpreet Monga",
 }
 
+DEFAULT_APPROVED_CONDUCTORS = [
+    "Sukhpreet Monga",
+    "Satyarth Dwivedi",
+    "Khushi Gera",
+]
+
 BOOLEAN_TRUE = {"yes", "true", "1", "y"}
 BOOLEAN_FALSE = {"no", "false", "0", "n"}
 
@@ -493,6 +499,7 @@ def enrich_metadata(
     sections: Dict[str, Dict[str, List[List[str]]]],
     category_map: Dict[str, str],
     conductor_map: Dict[str, str],
+    approved_conductors: List[str],
 ) -> Tuple[pd.DataFrame, Dict[str, str]]:
     topic_info = parse_topic(sections)
     topic_title = topic_info.get("Topic", "")
@@ -514,6 +521,13 @@ def enrich_metadata(
 
     category = resolve_category(topic_title, category_map)
     conductor = conductor_map.get(webinar_id) or panelist_name or host_name
+    conductor = conductor or ""
+    conductor = proper_case(conductor)
+    approved_set = {name.lower() for name in approved_conductors}
+    if conductor and conductor.lower() not in approved_set:
+        conductor_warning = f"Conductor '{conductor}' not in approved list"
+    else:
+        conductor_warning = ""
 
     df["Webinar Date"] = webinar_date
     df["Category"] = category
@@ -526,6 +540,7 @@ def enrich_metadata(
         "Actual Start Time": actual_start,
         "Derived Category": category,
         "Derived Conductor": conductor,
+        "Conductor Warning": conductor_warning,
     }
     return df, metadata
 
@@ -586,6 +601,7 @@ def process_uploaded_file(
     category_map: Dict[str, str],
     conductor_map: Dict[str, str],
     datetime_threshold: float,
+    approved_conductors: List[str],
 ) -> Tuple[pd.DataFrame, Dict[str, str], List[str], Dict[str, float]]:
     logs: List[str] = []
     rows = read_csv_rows(uploaded_bytes)
@@ -619,7 +635,9 @@ def process_uploaded_file(
 
     aggregated_df.drop(columns=["Source Name"], inplace=True, errors="ignore")
 
-    aggregated_df, metadata = enrich_metadata(aggregated_df, sections, category_map, conductor_map)
+    aggregated_df, metadata = enrich_metadata(
+        aggregated_df, sections, category_map, conductor_map, approved_conductors
+    )
     logs.append("Applied webinar metadata enrichment")
 
     final_df = ensure_schema(aggregated_df)
@@ -707,6 +725,11 @@ def main() -> None:
             value=json.dumps(DEFAULT_CONDUCTOR_MAP, indent=2),
             height=160,
         )
+        approved_conductors = st.text_area(
+            "Approved conductor names (comma separated)",
+            value=", ".join(DEFAULT_APPROVED_CONDUCTORS),
+            height=80,
+        )
         if dataset_type == "Webinar Attendees":
             threshold = st.slider("Datetime success threshold", 0.8, 1.0, 0.99, 0.01)
         else:
@@ -730,6 +753,8 @@ def main() -> None:
         st.error(str(err))
         return
 
+    approved_names = [name.strip() for name in approved_conductors.split(",") if name.strip()]
+
     button_label = (
         "Process attendee file" if dataset_type == "Webinar Attendees" else "Process registrant file"
     )
@@ -743,6 +768,7 @@ def main() -> None:
                         category_map,
                         conductor_map,
                         threshold if threshold is not None else 0.99,
+                        approved_names,
                     )
                 else:
                     final_df, metadata, logs, stats = process_registration_file(
@@ -799,6 +825,13 @@ def main() -> None:
             st.write(f"Registrations parsed: {int(stats.get('registration_parsed', 0))} / {int(stats.get('registration_total', 0))}")
             st.write(f"Deduplicated from {int(stats.get('raw_rows', 0))} to {int(stats.get('dedup_rows', 0))} rows")
             st.write(f"Registration time parse ratio: {reg_ratio:.2%}")
+        invalid_phones = stats.get("invalid_phone_rows")
+        if invalid_phones:
+            st.warning(f"Dropped {int(invalid_phones)} rows with invalid phone numbers.")
+
+        conductor_warning = metadata.get("Conductor Warning")
+        if conductor_warning:
+            st.warning(conductor_warning)
 
         st.subheader("Log")
         for entry in logs:
