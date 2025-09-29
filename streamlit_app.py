@@ -176,6 +176,12 @@ def proper_case(text: str) -> str:
 
 def normalize_phone(value: str) -> str:
     digits = re.sub(r"\D", "", value or "")
+    if not digits:
+        return ""
+    if len(digits) >= 10:
+        digits = digits[-10:]
+    if len(digits) != 10:
+        return ""
     return digits
 
 
@@ -258,6 +264,12 @@ def normalize_attendees(df: pd.DataFrame, stats: Dict[str, float]) -> pd.DataFra
         work["Phone"].eq("") & work["Email"].isin(email_to_phone.keys()),
         "Email",
     ].map(email_to_phone)
+
+    valid_mask = work["Phone"].str.len() == 10
+    invalid_count = int((~valid_mask).sum())
+    if invalid_count:
+        stats["invalid_phone_rows"] = stats.get("invalid_phone_rows", 0) + invalid_count
+    work = work[valid_mask].copy()
 
     attended_bool, attended_str = zip(*(normalize_bool(v) for v in work["Attended"]))
     work["Attended_bool"] = attended_bool
@@ -372,6 +384,12 @@ def normalize_registrants(df: pd.DataFrame, stats: Dict[str, float]) -> pd.DataF
     work["Phone"] = work["Phone"].map(normalize_phone)
     work["Registration Source"] = work["Source Name"].map(normalize_space)
     work["Attendance Type"] = work["Attendance Type"].map(lambda v: proper_case(v).title() if v else "")
+
+    valid_mask = work["Phone"].str.len() == 10
+    invalid_count = int((~valid_mask).sum())
+    if invalid_count:
+        stats["invalid_phone_rows"] = stats.get("invalid_phone_rows", 0) + invalid_count
+    work = work[valid_mask].copy()
 
     full_names = []
     for first, last in zip(work["First Name"], work["Last Name"]):
