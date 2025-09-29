@@ -1,0 +1,526 @@
+import csv
+import json
+import math
+import re
+from datetime import datetime
+from io import StringIO
+from typing import Dict, Iterable, List, Tuple
+
+import pandas as pd
+import streamlit as st
+
+
+REQUIRED_ATTENDEE_COLUMNS = [
+    "Attended",
+    "User Name (Original Name)",
+    "First Name",
+    "Last Name",
+    "Email",
+    "Phone",
+    "Registration Time",
+    "Approval Status",
+    "Join Time",
+    "Leave Time",
+    "Time in Session (minutes)",
+    "Is Guest",
+    "Country/Region Name",
+    "Source Name",
+]
+
+CLEAN_SCHEMA = [
+    "Webinar Date",
+    "Category",
+    "Attended",
+    "User Name (Original Name)",
+    "First Name",
+    "Last Name",
+    "Email",
+    "Phone",
+    "Registration Time",
+    "Approval Status",
+    "Join Time",
+    "Leave Time",
+    "Time in Session (minutes)",
+    "Is Guest",
+    "Country/Region Name",
+    "UserID",
+    "Webinar name",
+    "Webinar conductor",
+]
+
+SECTION_NAMES = {"Topic", "Host Details", "Panelist Details", "Attendee Details"}
+
+DEFAULT_CATEGORY_TOKEN_MAP = {
+    "acca": "ACCA",
+    "cma": "CMA",
+    "cfa": "CFA",
+    "cpa": "CPA",
+}
+
+DEFAULT_CONDUCTOR_MAP = {
+    "989 8318 8454": "Sukhpreet Monga",
+}
+
+BOOLEAN_TRUE = {"yes", "true", "1", "y"}
+BOOLEAN_FALSE = {"no", "false", "0", "n"}
+
+
+def read_csv_rows(raw_bytes: bytes) -> List[List[str]]:
+    text = raw_bytes.decode("utf-8-sig", errors="replace")
+    reader = csv.reader(StringIO(text))
+    return [list(row) for row in reader]
+
+
+def split_sections(rows: List[List[str]]) -> Dict[str, Dict[str, List[List[str]]]]:
+    sections: Dict[str, Dict[str, List[List[str]]]] = {}
+    idx = 0
+    total = len(rows)
+    while idx < total:
+        raw = rows[idx]
+        stripped = [cell.strip() for cell in raw]
+        if not any(stripped):
+            idx += 1
+            continue
+        label = None
+        header: List[str] = []
+        if len(stripped) == 1 and stripped[0] in SECTION_NAMES:
+            label = stripped[0]
+            idx += 1
+            if idx >= total:
+                break
+            header = [cell.strip() for cell in rows[idx]]
+            idx += 1
+        elif stripped[0] == "Topic" and "Topic" not in sections:
+            label = "Topic"
+            header = [cell.strip() for cell in raw]
+            idx += 1
+        else:
+            idx += 1
+            continue
+
+        data_rows: List[List[str]] = []
+        while idx < total:
+            next_raw = rows[idx]
+            next_stripped = [cell.strip() for cell in next_raw]
+            if not any(next_stripped):
+                idx += 1
+                continue
+            starter = next_stripped[0]
+            if (len(next_stripped) == 1 and starter in SECTION_NAMES) or (
+                starter == "Topic" and len(next_raw) > 1 and label != "Topic"
+            ):
+                break
+            row = list(next_raw[: len(header)])
+            if len(row) < len(header):
+                row.extend([""] * (len(header) - len(row)))
+            else:
+                row = row[: len(header)]
+            data_rows.append([cell.strip() for cell in row])
+            idx += 1
+        sections[label] = {"header": header, "rows": data_rows}
+    return sections
+
+
+def validate_attendee_header(header: List[str]) -> None:
+    normalized = [col.strip() for col in header]
+    if normalized[: len(REQUIRED_ATTENDEE_COLUMNS)] != REQUIRED_ATTENDEE_COLUMNS:
+        raise ValueError("Attendee header does not match SOP specification")
+    if len(normalized) not in (len(REQUIRED_ATTENDEE_COLUMNS), len(REQUIRED_ATTENDEE_COLUMNS) + 1):
+        raise ValueError("Attendee header contains unexpected columns")
+    if len(normalized) == len(REQUIRED_ATTENDEE_COLUMNS) + 1 and normalized[-1] != "Source Name":
+        raise ValueError("Only 'Source Name' is allowed as optional attendee column")
+
+
+def normalize_space(text: str) -> str:
+    text = text.strip()
+    return re.sub(r"\s+", " ", text)
+
+
+def proper_case(text: str) -> str:
+    if not text:
+        return text
+    return " ".join(word.capitalize() for word in normalize_space(text).split(" "))
+
+
+def normalize_phone(value: str) -> str:
+    digits = re.sub(r"\D", "", value or "")
+    return digits
+
+
+def normalize_bool(value: str) -> Tuple[bool, str]:
+    token = (value or "").strip().lower()
+    if token in BOOLEAN_TRUE:
+        return True, "Yes"
+    if token in BOOLEAN_FALSE:
+        return False, "No"
+    return False, ""
+
+
+def parse_datetime(value: str) -> Tuple[datetime, str]:
+    if not value or not value.strip():
+        return None, ""
+    dt = pd.to_datetime(value, dayfirst=True, errors="coerce")
+    if pd.isna(dt):
+        return None, ""
+    dt_native = dt.to_pydatetime()
+    return dt_native, dt_native.strftime("%d/%m/%Y %I:%M:%S %p")
+
+
+def first_non_blank(values: Iterable[str]) -> str:
+    for item in values:
+        if isinstance(item, str) and item.strip():
+            return item
+    return ""
+
+
+def normalize_attendees(df: pd.DataFrame, stats: Dict[str, float]) -> pd.DataFrame:
+    work = df.fillna("").copy()
+    for column in [
+        "Attended",
+        "User Name (Original Name)",
+        "First Name",
+        "Last Name",
+        "Email",
+        "Phone",
+        "Registration Time",
+        "Approval Status",
+        "Join Time",
+        "Leave Time",
+        "Time in Session (minutes)",
+        "Is Guest",
+        "Country/Region Name",
+        "Source Name",
+    ]:
+        work[column] = work[column].astype(str).map(normalize_space)
+
+    for column in ["Join Time", "Leave Time", "Registration Time"]:
+        work[column] = work[column].replace("--", "")
+
+    work["User Name (Original Name)"] = work["User Name (Original Name)"].map(proper_case)
+    work["First Name"] = work["First Name"].map(proper_case)
+    work["Last Name"] = work["Last Name"].map(proper_case)
+    work["Country/Region Name"] = work["Country/Region Name"].map(proper_case)
+    work["Email"] = work["Email"].str.lower()
+
+    work["Phone"] = work["Phone"].map(normalize_phone)
+
+    attended_bool, attended_str = zip(*(normalize_bool(v) for v in work["Attended"]))
+    work["Attended_bool"] = attended_bool
+    work["Attended"] = attended_str
+
+    guest_bool, guest_str = zip(*(normalize_bool(v) for v in work["Is Guest"]))
+    work["Is Guest_bool"] = guest_bool
+    work["Is Guest"] = guest_str
+
+    join_inputs = work["Join Time"].tolist()
+    leave_inputs = work["Leave Time"].tolist()
+    reg_inputs = work["Registration Time"].tolist()
+
+    join_dt, join_fmt = zip(*(parse_datetime(v) for v in join_inputs))
+    work["_join_dt"] = join_dt
+    work["Join Time"] = join_fmt
+    leave_dt, leave_fmt = zip(*(parse_datetime(v) for v in leave_inputs))
+    work["_leave_dt"] = leave_dt
+    work["Leave Time"] = leave_fmt
+    reg_dt, reg_fmt = zip(*(parse_datetime(v) for v in reg_inputs))
+    work["Registration Time"] = reg_fmt
+
+    work["_tis_minutes"] = pd.to_numeric(
+        work["Time in Session (minutes)"].replace({"": "0", "--": "0"}),
+        errors="coerce",
+    ).fillna(0.0)
+    work["Time in Session (minutes)"] = work["_tis_minutes"].map(lambda x: str(int(math.floor(x))))
+
+    stats["join_parsed"] = sum(dt is not None for dt in join_dt)
+    stats["join_total"] = sum(bool(v) for v in join_inputs)
+    stats["leave_parsed"] = sum(dt is not None for dt in leave_dt)
+    stats["leave_total"] = sum(bool(v) for v in leave_inputs)
+    stats["registration_parsed"] = sum(dt is not None for dt in reg_dt)
+    stats["registration_total"] = sum(bool(v) for v in reg_inputs)
+
+    return work
+
+
+def aggregate_group(group: pd.DataFrame) -> Dict[str, str]:
+    group_sorted = group.sort_values(by="_join_dt", ascending=True)
+    result: Dict[str, str] = {}
+
+    result["Time in Session (minutes)"] = str(int(math.floor(group["_tis_minutes"].sum())))
+
+    join_candidates = group["_join_dt"].dropna()
+    leave_candidates = group["_leave_dt"].dropna()
+    result["Join Time"] = (
+        join_candidates.min().strftime("%d/%m/%Y %I:%M:%S %p") if not join_candidates.empty else ""
+    )
+    result["Leave Time"] = (
+        leave_candidates.max().strftime("%d/%m/%Y %I:%M:%S %p") if not leave_candidates.empty else ""
+    )
+
+    result["Attended"] = "Yes" if group["Attended_bool"].any() else "No"
+
+    if group["Is Guest_bool"].any():
+        result["Is Guest"] = "Yes"
+    elif (group["Is Guest"].eq("No")).all():
+        result["Is Guest"] = "No"
+    else:
+        result["Is Guest"] = ""
+
+    for column in [
+        "User Name (Original Name)",
+        "First Name",
+        "Last Name",
+        "Email",
+        "Phone",
+        "Registration Time",
+        "Approval Status",
+        "Country/Region Name",
+    ]:
+        result[column] = first_non_blank(group_sorted[column])
+
+    result["Source Name"] = ""
+    result["UserID"] = result["Phone"]
+    return result
+
+
+def deduplicate_attendees(df: pd.DataFrame) -> pd.DataFrame:
+    work = df.copy()
+    work["__row_id"] = range(len(work))
+
+    def make_key(row: pd.Series) -> str:
+        if row["Phone"]:
+            return f"phone::{row['Phone']}"
+        if row["Email"]:
+            return f"email::{row['Email']}"
+        return f"row::{row['__row_id']}"
+
+    work["__group_key"] = work.apply(make_key, axis=1)
+    aggregated = [aggregate_group(group) for _, group in work.groupby("__group_key", sort=False)]
+    return pd.DataFrame(aggregated)
+
+
+def parse_topic(sections: Dict[str, Dict[str, List[List[str]]]]) -> Dict[str, str]:
+    if "Topic" not in sections or not sections["Topic"]["rows"]:
+        return {}
+    header = sections["Topic"]["header"]
+    row = sections["Topic"]["rows"][0]
+    topic_info = {header[i]: row[i] for i in range(len(header))}
+    topic_info["Topic"] = normalize_space(topic_info.get("Topic", ""))
+    topic_info["Webinar ID"] = normalize_space(topic_info.get("Webinar ID", ""))
+    return topic_info
+
+
+def get_section_primary_name(section: Dict[str, List[List[str]]]) -> str:
+    if not section or not section.get("rows"):
+        return ""
+    header = section["header"]
+    rows = section["rows"]
+    if "User Name (Original Name)" not in header:
+        return ""
+    idx = header.index("User Name (Original Name)")
+    return proper_case(rows[0][idx])
+
+
+def resolve_category(topic: str, token_map: Dict[str, str]) -> str:
+    topic_lower = topic.lower()
+    for token, category in token_map.items():
+        if token.lower() in topic_lower:
+            return category
+    return ""
+
+
+def enrich_metadata(
+    df: pd.DataFrame,
+    sections: Dict[str, Dict[str, List[List[str]]]],
+    category_map: Dict[str, str],
+    conductor_map: Dict[str, str],
+) -> Tuple[pd.DataFrame, Dict[str, str]]:
+    topic_info = parse_topic(sections)
+    topic_title = topic_info.get("Topic", "")
+    webinar_id = topic_info.get("Webinar ID", "")
+    actual_start = topic_info.get("Actual Start Time", "")
+
+    panelist_name = get_section_primary_name(sections.get("Panelist Details", {}))
+    host_name = get_section_primary_name(sections.get("Host Details", {}))
+
+    if actual_start:
+        parsed_start = pd.to_datetime(actual_start, dayfirst=True, errors="coerce")
+        if pd.isna(parsed_start):
+            webinar_date = ""
+        else:
+            dt = parsed_start.to_pydatetime()
+            webinar_date = f"{dt.day}/{dt.month}/{dt.year}"
+    else:
+        webinar_date = ""
+
+    category = resolve_category(topic_title, category_map)
+    conductor = conductor_map.get(webinar_id) or panelist_name or host_name
+
+    df["Webinar Date"] = webinar_date
+    df["Category"] = category
+    df["Webinar name"] = topic_title
+    df["Webinar conductor"] = conductor
+
+    metadata = {
+        "Webinar ID": webinar_id,
+        "Topic": topic_title,
+        "Actual Start Time": actual_start,
+        "Derived Category": category,
+        "Derived Conductor": conductor,
+    }
+    return df, metadata
+
+
+def ensure_schema(df: pd.DataFrame) -> pd.DataFrame:
+    for column in CLEAN_SCHEMA:
+        if column not in df.columns:
+            df[column] = ""
+    return df[CLEAN_SCHEMA]
+
+
+def process_uploaded_file(
+    uploaded_bytes: bytes,
+    category_map: Dict[str, str],
+    conductor_map: Dict[str, str],
+    datetime_threshold: float,
+) -> Tuple[pd.DataFrame, Dict[str, str], List[str], Dict[str, float]]:
+    logs: List[str] = []
+    rows = read_csv_rows(uploaded_bytes)
+    logs.append(f"Loaded {len(rows)} raw rows from CSV")
+    sections = split_sections(rows)
+    logs.append(f"Detected sections: {', '.join(sorted(sections.keys()))}")
+
+    if "Attendee Details" not in sections:
+        raise ValueError("Missing 'Attendee Details' section in input file")
+
+    attendee_section = sections["Attendee Details"]
+    validate_attendee_header(attendee_section["header"])
+    logs.append("Attendee header validated against SOP")
+
+    attendee_df = pd.DataFrame(attendee_section["rows"], columns=attendee_section["header"])
+    stats: Dict[str, float] = {}
+    attendee_df = normalize_attendees(attendee_df, stats)
+    logs.append(f"Normalized {len(attendee_df)} attendee rows")
+
+    join_ratio = stats.get("join_parsed", 0) / max(stats.get("join_total", 1), 1)
+    leave_ratio = stats.get("leave_parsed", 0) / max(stats.get("leave_total", 1), 1)
+    if join_ratio < datetime_threshold or leave_ratio < datetime_threshold:
+        raise ValueError("Datetime parse success below configured threshold")
+    logs.append(
+        f"Join parse success: {stats.get('join_parsed', 0)}/{stats.get('join_total', 0)}; "
+        f"Leave parse success: {stats.get('leave_parsed', 0)}/{stats.get('leave_total', 0)}"
+    )
+
+    aggregated_df = deduplicate_attendees(attendee_df)
+    logs.append(f"Deduplicated to {len(aggregated_df)} attendee records")
+
+    aggregated_df.drop(columns=["Source Name"], inplace=True, errors="ignore")
+
+    aggregated_df, metadata = enrich_metadata(aggregated_df, sections, category_map, conductor_map)
+    logs.append("Applied webinar metadata enrichment")
+
+    final_df = ensure_schema(aggregated_df)
+
+    if not set(final_df.columns) == set(CLEAN_SCHEMA):
+        raise ValueError("Final schema mismatch")
+
+    if not set(final_df["Attended"].unique()) <= {"Yes", "No"}:
+        raise ValueError("Attended column contains non canonical values")
+
+    if not set(final_df["Is Guest"].dropna().replace({pd.NA: ""})) <= {"", "Yes", "No"}:
+        raise ValueError("Is Guest column contains invalid values")
+
+    return final_df, metadata, logs, stats
+
+
+def parse_json_config(raw: str, default: Dict[str, str]) -> Dict[str, str]:
+    raw = raw.strip()
+    if not raw:
+        return default
+    try:
+        payload = json.loads(raw)
+        if not isinstance(payload, dict):
+            raise ValueError
+        return {str(k): str(v) for k, v in payload.items()}
+    except ValueError as exc:  # pragma: no cover - user input
+        raise ValueError("Configuration must be a JSON object") from exc
+
+
+def main() -> None:
+    st.set_page_config(page_title="Webinar Attendee Cleaner", layout="wide")
+    st.title("Zoom Webinar → WebEngage Cleaner")
+    st.caption("Upload raw Zoom attendee report CSVs and export WebEngage-ready data.")
+
+    with st.sidebar:
+        st.header("Configuration")
+        category_json = st.text_area(
+            "Category token map (JSON)",
+            value=json.dumps(DEFAULT_CATEGORY_TOKEN_MAP, indent=2),
+            height=200,
+        )
+        conductor_json = st.text_area(
+            "Conductor map (Webinar ID → Name)",
+            value=json.dumps(DEFAULT_CONDUCTOR_MAP, indent=2),
+            height=160,
+        )
+        threshold = st.slider("Datetime success threshold", 0.8, 1.0, 0.99, 0.01)
+
+    uploaded = st.file_uploader("Raw Zoom attendee CSV", type=["csv"])
+
+    if uploaded is None:
+        st.info("Upload a raw Zoom CSV file to begin.")
+        return
+
+    try:
+        category_map = parse_json_config(category_json, DEFAULT_CATEGORY_TOKEN_MAP)
+        conductor_map = parse_json_config(conductor_json, DEFAULT_CONDUCTOR_MAP)
+    except ValueError as err:
+        st.error(str(err))
+        return
+
+    if st.button("Process file", type="primary"):
+        with st.spinner("Cleaning in progress..."):
+            try:
+                final_df, metadata, logs, stats = process_uploaded_file(
+                    uploaded.getvalue(), category_map, conductor_map, threshold
+                )
+            except Exception as err:  # pragma: no cover - user interaction
+                st.error(str(err))
+                return
+
+        st.success(f"Processed {len(final_df)} clean attendee records")
+
+        meta_cols = st.columns(len(metadata))
+        for (label, value), col in zip(metadata.items(), meta_cols):
+            col.metric(label, value or "—")
+
+        st.subheader("Preview")
+        st.dataframe(final_df, use_container_width=True)
+
+        csv_buffer = StringIO()
+        final_df.to_csv(csv_buffer, index=False)
+        st.download_button(
+            "Download cleaned CSV",
+            data=csv_buffer.getvalue().encode("utf-8"),
+            file_name="webengage_clean.csv",
+            mime="text/csv",
+        )
+
+        st.subheader("Diagnostics")
+        join_ratio = stats.get("join_parsed", 0) / max(stats.get("join_total", 1), 1)
+        leave_ratio = stats.get("leave_parsed", 0) / max(stats.get("leave_total", 1), 1)
+        st.write(
+            f"Join parse success: {stats.get('join_parsed', 0)} / {stats.get('join_total', 0)}"
+        )
+        st.write(
+            f"Leave parse success: {stats.get('leave_parsed', 0)} / {stats.get('leave_total', 0)}"
+        )
+        st.write(f"Join success ratio: {join_ratio:.2%}")
+        st.write(f"Leave success ratio: {leave_ratio:.2%}")
+
+        st.subheader("Log")
+        for entry in logs:
+            st.write(entry)
+
+
+if __name__ == "__main__":  # pragma: no cover - Streamlit runtime
+    main()
