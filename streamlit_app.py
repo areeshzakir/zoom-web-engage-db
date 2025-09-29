@@ -30,6 +30,7 @@ REQUIRED_ATTENDEE_COLUMNS = [
 CLEAN_SCHEMA = [
     "Webinar Date",
     "Category",
+    "Webinar ID",
     "Attended",
     "User Name (Original Name)",
     "First Name",
@@ -59,6 +60,7 @@ REGISTRATION_SCHEMA = [
     "Registration Source",
     "Attendance Type",
     "UserID",
+    "Webinar ID",
     "Webinar name",
     "Webinar Date",
 ]
@@ -531,6 +533,7 @@ def enrich_metadata(
 
     df["Webinar Date"] = webinar_date
     df["Category"] = category
+    df["Webinar ID"] = webinar_id
     df["Webinar name"] = topic_title
     df["Webinar conductor"] = conductor
 
@@ -579,6 +582,7 @@ def enrich_registration_metadata(
 
     df["Webinar name"] = topic_title
     df["Webinar Date"] = webinar_date
+    df["Webinar ID"] = webinar_id
 
     metadata = {
         "Webinar ID": webinar_id,
