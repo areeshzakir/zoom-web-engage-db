@@ -204,6 +204,18 @@ def normalize_attendees(df: pd.DataFrame, stats: Dict[str, float]) -> pd.DataFra
 
     work["Phone"] = work["Phone"].map(normalize_phone)
 
+    email_to_phone: Dict[str, str] = {}
+    for email, phone in zip(work["Email"], work["Phone"]):
+        if email and phone and email not in email_to_phone:
+            email_to_phone[email] = phone
+    work.loc[
+        work["Phone"].eq("") & work["Email"].isin(email_to_phone.keys()),
+        "Phone",
+    ] = work.loc[
+        work["Phone"].eq("") & work["Email"].isin(email_to_phone.keys()),
+        "Email",
+    ].map(email_to_phone)
+
     attended_bool, attended_str = zip(*(normalize_bool(v) for v in work["Attended"]))
     work["Attended_bool"] = attended_bool
     work["Attended"] = attended_str
@@ -286,16 +298,23 @@ def deduplicate_attendees(df: pd.DataFrame) -> pd.DataFrame:
     work = df.copy()
     work["__row_id"] = range(len(work))
 
-    def make_key(row: pd.Series) -> str:
-        if row["Phone"]:
-            return f"phone::{row['Phone']}"
-        if row["Email"]:
-            return f"email::{row['Email']}"
-        return f"row::{row['__row_id']}"
+    grouped_rows: List[Dict[str, str]] = []
 
-    work["__group_key"] = work.apply(make_key, axis=1)
-    aggregated = [aggregate_group(group) for _, group in work.groupby("__group_key", sort=False)]
-    return pd.DataFrame(aggregated)
+    phone_groups = work.groupby("Phone", sort=False)
+    for phone_value, phone_group in phone_groups:
+        if phone_value:
+            grouped_rows.append(aggregate_group(phone_group))
+            continue
+
+        email_groups = phone_group.groupby("Email", sort=False)
+        for email_value, email_group in email_groups:
+            if email_value:
+                grouped_rows.append(aggregate_group(email_group))
+                continue
+            for _, single_row_group in email_group.groupby("__row_id", sort=False):
+                grouped_rows.append(aggregate_group(single_row_group))
+
+    return pd.DataFrame(grouped_rows)
 
 
 def parse_topic(sections: Dict[str, Dict[str, List[List[str]]]]) -> Dict[str, str]:
