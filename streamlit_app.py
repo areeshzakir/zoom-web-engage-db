@@ -48,7 +48,22 @@ CLEAN_SCHEMA = [
     "Webinar conductor",
 ]
 
-SECTION_NAMES = {"Topic", "Host Details", "Panelist Details", "Attendee Details"}
+REGISTRATION_SCHEMA = [
+    "User Name (Original Name)",
+    "First Name",
+    "Last Name",
+    "Email",
+    "Registration Time",
+    "Approval Status",
+    "Phone",
+    "Registration Source",
+    "Attendance Type",
+    "UserID",
+    "Webinar name",
+    "Webinar Date",
+]
+
+SECTION_NAMES = {"Topic", "Host Details", "Panelist Details", "Attendee Details", "Registrant Details"}
 
 DEFAULT_CATEGORY_TOKEN_MAP = {
     "acca": "ACCA",
@@ -63,6 +78,17 @@ DEFAULT_CONDUCTOR_MAP = {
 
 BOOLEAN_TRUE = {"yes", "true", "1", "y"}
 BOOLEAN_FALSE = {"no", "false", "0", "n"}
+
+REGISTRATION_REQUIRED_COLUMNS = [
+    "First Name",
+    "Last Name",
+    "Email",
+    "Registration Time",
+    "Approval Status",
+    "Phone",
+    "Source Name",
+    "Attendance Type",
+]
 
 
 def read_csv_rows(raw_bytes: bytes) -> List[List[str]]:
@@ -129,6 +155,12 @@ def validate_attendee_header(header: List[str]) -> None:
         raise ValueError("Attendee header contains unexpected columns")
     if len(normalized) == len(REQUIRED_ATTENDEE_COLUMNS) + 1 and normalized[-1] != "Source Name":
         raise ValueError("Only 'Source Name' is allowed as optional attendee column")
+
+
+def validate_registration_header(header: List[str]) -> None:
+    normalized = [col.strip() for col in header]
+    if normalized != REGISTRATION_REQUIRED_COLUMNS:
+        raise ValueError("Registration header does not match expected schema")
 
 
 def normalize_space(text: str) -> str:
@@ -317,6 +349,86 @@ def deduplicate_attendees(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(grouped_rows)
 
 
+def normalize_registrants(df: pd.DataFrame, stats: Dict[str, float]) -> pd.DataFrame:
+    work = df.fillna("").copy()
+    for column in REGISTRATION_REQUIRED_COLUMNS:
+        work[column] = work[column].astype(str).map(normalize_space)
+
+    work["First Name"] = work["First Name"].map(proper_case)
+    work["Last Name"] = work["Last Name"].map(proper_case)
+    work["Email"] = work["Email"].str.lower()
+
+    work["Phone"] = work["Phone"].map(normalize_phone)
+    work["Registration Source"] = work["Source Name"].map(normalize_space)
+    work["Attendance Type"] = work["Attendance Type"].map(lambda v: proper_case(v).title() if v else "")
+
+    full_names = []
+    for first, last in zip(work["First Name"], work["Last Name"]):
+        components = [part for part in [first, last] if part]
+        full_names.append(" ".join(components))
+    work["User Name (Original Name)"] = full_names
+
+    reg_inputs = work["Registration Time"].tolist()
+    reg_dt, reg_fmt = zip(*(parse_datetime(v) for v in reg_inputs))
+    work["_reg_dt"] = reg_dt
+    work["Registration Time"] = reg_fmt
+
+    stats["registration_parsed"] = sum(dt is not None for dt in reg_dt)
+    stats["registration_total"] = sum(bool(v) for v in reg_inputs)
+
+    return work
+
+
+def aggregate_registration_group(group: pd.DataFrame) -> Dict[str, str]:
+    group_sorted = group.sort_values(by="_reg_dt", ascending=True)
+    result: Dict[str, str] = {}
+
+    reg_dates = group["_reg_dt"].dropna()
+    if not reg_dates.empty:
+        earliest = reg_dates.min()
+        result["Registration Time"] = earliest.strftime("%d/%m/%Y %I:%M:%S %p")
+    else:
+        result["Registration Time"] = first_non_blank(group_sorted["Registration Time"])
+
+    for column in [
+        "User Name (Original Name)",
+        "First Name",
+        "Last Name",
+        "Email",
+        "Phone",
+        "Approval Status",
+        "Registration Source",
+        "Attendance Type",
+    ]:
+        result[column] = first_non_blank(group_sorted[column])
+
+    result["UserID"] = result["Phone"]
+    return result
+
+
+def deduplicate_registrants(df: pd.DataFrame) -> pd.DataFrame:
+    work = df.copy()
+    work["__row_id"] = range(len(work))
+
+    grouped_rows: List[Dict[str, str]] = []
+
+    phone_groups = work.groupby("Phone", sort=False)
+    for phone_value, phone_group in phone_groups:
+        if phone_value:
+            grouped_rows.append(aggregate_registration_group(phone_group))
+            continue
+
+        email_groups = phone_group.groupby("Email", sort=False)
+        for email_value, email_group in email_groups:
+            if email_value:
+                grouped_rows.append(aggregate_registration_group(email_group))
+                continue
+            for _, single_row_group in email_group.groupby("__row_id", sort=False):
+                grouped_rows.append(aggregate_registration_group(single_row_group))
+
+    return pd.DataFrame(grouped_rows)
+
+
 def parse_topic(sections: Dict[str, Dict[str, List[List[str]]]]) -> Dict[str, str]:
     if "Topic" not in sections or not sections["Topic"]["rows"]:
         return {}
@@ -396,6 +508,48 @@ def ensure_schema(df: pd.DataFrame) -> pd.DataFrame:
     return df[CLEAN_SCHEMA]
 
 
+def enrich_registration_metadata(
+    df: pd.DataFrame,
+    sections: Dict[str, Dict[str, List[List[str]]]],
+) -> Tuple[pd.DataFrame, Dict[str, str]]:
+    topic_info = parse_topic(sections)
+    topic_title = topic_info.get("Topic", "")
+    webinar_id = topic_info.get("ID", "") or topic_info.get("Webinar ID", "")
+    scheduled = (
+        topic_info.get("Actual Start Time")
+        or topic_info.get("Scheduled Time")
+        or topic_info.get("Scheduled Start Time")
+        or ""
+    )
+
+    if scheduled:
+        scheduled_dt = pd.to_datetime(scheduled, dayfirst=True, errors="coerce")
+        if pd.isna(scheduled_dt):
+            webinar_date = ""
+        else:
+            dt = scheduled_dt.to_pydatetime()
+            webinar_date = f"{dt.day}/{dt.month}/{dt.year}"
+    else:
+        webinar_date = ""
+
+    df["Webinar name"] = topic_title
+    df["Webinar Date"] = webinar_date
+
+    metadata = {
+        "Webinar ID": webinar_id,
+        "Topic": topic_title,
+        "Scheduled Time": scheduled,
+    }
+    return df, metadata
+
+
+def ensure_registration_schema(df: pd.DataFrame) -> pd.DataFrame:
+    for column in REGISTRATION_SCHEMA:
+        if column not in df.columns:
+            df[column] = ""
+    return df[REGISTRATION_SCHEMA]
+
+
 def process_uploaded_file(
     uploaded_bytes: bytes,
     category_map: Dict[str, str],
@@ -451,6 +605,41 @@ def process_uploaded_file(
     return final_df, metadata, logs, stats
 
 
+def process_registration_file(
+    uploaded_bytes: bytes,
+    category_map: Dict[str, str],
+    conductor_map: Dict[str, str],
+) -> Tuple[pd.DataFrame, Dict[str, str], List[str], Dict[str, float]]:
+    logs: List[str] = []
+    rows = read_csv_rows(uploaded_bytes)
+    logs.append(f"Loaded {len(rows)} raw rows from CSV")
+    sections = split_sections(rows)
+    logs.append(f"Detected sections: {', '.join(sorted(sections.keys()))}")
+
+    if "Attendee Details" not in sections:
+        raise ValueError("Missing 'Attendee Details' section in input file")
+
+    registrant_section = sections["Attendee Details"]
+    validate_registration_header(registrant_section["header"])
+    logs.append("Registration header validated")
+
+    registrant_df = pd.DataFrame(registrant_section["rows"], columns=registrant_section["header"])
+    stats: Dict[str, float] = {"raw_rows": float(len(registrant_df))}
+    registrant_df = normalize_registrants(registrant_df, stats)
+    logs.append(f"Normalized {len(registrant_df)} registration rows")
+
+    dedup_df = deduplicate_registrants(registrant_df)
+    stats["dedup_rows"] = float(len(dedup_df))
+    logs.append(f"Deduplicated to {len(dedup_df)} registration records")
+
+    dedup_df, metadata = enrich_registration_metadata(dedup_df, sections)
+    logs.append("Applied webinar metadata enrichment")
+
+    final_df = ensure_registration_schema(dedup_df)
+
+    return final_df, metadata, logs, stats
+
+
 def parse_json_config(raw: str, default: Dict[str, str]) -> Dict[str, str]:
     raw = raw.strip()
     if not raw:
@@ -469,6 +658,12 @@ def main() -> None:
     st.title("Zoom Webinar → WebEngage Cleaner")
     st.caption("Upload raw Zoom attendee report CSVs and export WebEngage-ready data.")
 
+    dataset_type = st.radio(
+        "Workflow",
+        ("Webinar Attendees", "Webinar Registrations"),
+        horizontal=True,
+    )
+
     with st.sidebar:
         st.header("Configuration")
         category_json = st.text_area(
@@ -481,9 +676,17 @@ def main() -> None:
             value=json.dumps(DEFAULT_CONDUCTOR_MAP, indent=2),
             height=160,
         )
-        threshold = st.slider("Datetime success threshold", 0.8, 1.0, 0.99, 0.01)
+        if dataset_type == "Webinar Attendees":
+            threshold = st.slider("Datetime success threshold", 0.8, 1.0, 0.99, 0.01)
+        else:
+            threshold = None
 
-    uploaded = st.file_uploader("Raw Zoom attendee CSV", type=["csv"])
+    upload_label = (
+        "Raw Zoom attendee CSV"
+        if dataset_type == "Webinar Attendees"
+        else "Raw Zoom registrant CSV"
+    )
+    uploaded = st.file_uploader(upload_label, type=["csv"])
 
     if uploaded is None:
         st.info("Upload a raw Zoom CSV file to begin.")
@@ -496,17 +699,34 @@ def main() -> None:
         st.error(str(err))
         return
 
-    if st.button("Process file", type="primary"):
+    button_label = (
+        "Process attendee file" if dataset_type == "Webinar Attendees" else "Process registrant file"
+    )
+
+    if st.button(button_label, type="primary"):
         with st.spinner("Cleaning in progress..."):
             try:
-                final_df, metadata, logs, stats = process_uploaded_file(
-                    uploaded.getvalue(), category_map, conductor_map, threshold
-                )
+                if dataset_type == "Webinar Attendees":
+                    final_df, metadata, logs, stats = process_uploaded_file(
+                        uploaded.getvalue(),
+                        category_map,
+                        conductor_map,
+                        threshold if threshold is not None else 0.99,
+                    )
+                else:
+                    final_df, metadata, logs, stats = process_registration_file(
+                        uploaded.getvalue(),
+                        category_map,
+                        conductor_map,
+                    )
             except Exception as err:  # pragma: no cover - user interaction
                 st.error(str(err))
                 return
 
-        st.success(f"Processed {len(final_df)} clean attendee records")
+        processed_label = (
+            "attendee" if dataset_type == "Webinar Attendees" else "registrant"
+        )
+        st.success(f"Processed {len(final_df)} clean {processed_label} records")
 
         meta_cols = st.columns(len(metadata))
         for (label, value), col in zip(metadata.items(), meta_cols):
@@ -515,26 +735,39 @@ def main() -> None:
         st.subheader("Preview")
         st.dataframe(final_df, use_container_width=True)
 
+        download_name = (
+            "webengage_clean.csv"
+            if dataset_type == "Webinar Attendees"
+            else "webengage_registration_clean.csv"
+        )
         csv_buffer = StringIO()
         final_df.to_csv(csv_buffer, index=False)
         st.download_button(
             "Download cleaned CSV",
             data=csv_buffer.getvalue().encode("utf-8"),
-            file_name="webengage_clean.csv",
+            file_name=download_name,
             mime="text/csv",
         )
 
         st.subheader("Diagnostics")
-        join_ratio = stats.get("join_parsed", 0) / max(stats.get("join_total", 1), 1)
-        leave_ratio = stats.get("leave_parsed", 0) / max(stats.get("leave_total", 1), 1)
-        st.write(
-            f"Join parse success: {stats.get('join_parsed', 0)} / {stats.get('join_total', 0)}"
-        )
-        st.write(
-            f"Leave parse success: {stats.get('leave_parsed', 0)} / {stats.get('leave_total', 0)}"
-        )
-        st.write(f"Join success ratio: {join_ratio:.2%}")
-        st.write(f"Leave success ratio: {leave_ratio:.2%}")
+        if dataset_type == "Webinar Attendees":
+            join_ratio = stats.get("join_parsed", 0) / max(stats.get("join_total", 1), 1)
+            leave_ratio = stats.get("leave_parsed", 0) / max(stats.get("leave_total", 1), 1)
+            st.write(
+                f"Join parse success: {stats.get('join_parsed', 0)} / {stats.get('join_total', 0)}"
+            )
+            st.write(
+                f"Leave parse success: {stats.get('leave_parsed', 0)} / {stats.get('leave_total', 0)}"
+            )
+            st.write(f"Join success ratio: {join_ratio:.2%}")
+            st.write(f"Leave success ratio: {leave_ratio:.2%}")
+        else:
+            reg_ratio = stats.get("registration_parsed", 0) / max(
+                stats.get("registration_total", 1), 1
+            )
+            st.write(f"Registrations parsed: {int(stats.get('registration_parsed', 0))} / {int(stats.get('registration_total', 0))}")
+            st.write(f"Deduplicated from {int(stats.get('raw_rows', 0))} to {int(stats.get('dedup_rows', 0))} rows")
+            st.write(f"Registration time parse ratio: {reg_ratio:.2%}")
 
         st.subheader("Log")
         for entry in logs:
