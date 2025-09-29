@@ -179,6 +179,17 @@ def normalize_phone(value: str) -> str:
     return digits
 
 
+def build_user_id(phone: str) -> str:
+    if not phone:
+        return ""
+    digits = re.sub(r"\D", "", phone)
+    if not digits:
+        return ""
+    tail = digits[-10:]
+    tail = tail.zfill(10)
+    return f"91{tail}"
+
+
 def normalize_bool(value: str) -> Tuple[bool, str]:
     token = (value or "").strip().lower()
     if token in BOOLEAN_TRUE:
@@ -322,7 +333,7 @@ def aggregate_group(group: pd.DataFrame) -> Dict[str, str]:
         result[column] = first_non_blank(group_sorted[column])
 
     result["Source Name"] = ""
-    result["UserID"] = result["Phone"]
+    result["UserID"] = build_user_id(result["Phone"])
     return result
 
 
@@ -402,7 +413,7 @@ def aggregate_registration_group(group: pd.DataFrame) -> Dict[str, str]:
     ]:
         result[column] = first_non_blank(group_sorted[column])
 
-    result["UserID"] = result["Phone"]
+    result["UserID"] = build_user_id(result["Phone"])
     return result
 
 
@@ -505,6 +516,7 @@ def ensure_schema(df: pd.DataFrame) -> pd.DataFrame:
     for column in CLEAN_SCHEMA:
         if column not in df.columns:
             df[column] = ""
+    df["UserID"] = df["UserID"].map(build_user_id)
     return df[CLEAN_SCHEMA]
 
 
@@ -547,6 +559,7 @@ def ensure_registration_schema(df: pd.DataFrame) -> pd.DataFrame:
     for column in REGISTRATION_SCHEMA:
         if column not in df.columns:
             df[column] = ""
+    df["UserID"] = df["UserID"].map(build_user_id)
     return df[REGISTRATION_SCHEMA]
 
 
