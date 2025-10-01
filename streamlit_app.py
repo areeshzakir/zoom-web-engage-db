@@ -2,12 +2,13 @@ import csv
 import json
 import math
 import re
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from io import StringIO
 from typing import Dict, Iterable, List, Tuple
 
 import pandas as pd
 import streamlit as st
+import requests
 
 
 REQUIRED_ATTENDEE_COLUMNS = [
@@ -84,6 +85,12 @@ DEFAULT_APPROVED_CONDUCTORS = [
     "Khushi Gera",
 ]
 
+WEBENGAGE_HOST = "https://api.webengage.com"
+IST_TZ = timezone(timedelta(hours=5, minutes=30))
+
+PLUTUS_ATTENDEE_EVENT_NAME = "Plutus Webinar Attended"
+PLUTUS_REGISTRATION_EVENT_NAME = "Plutus Webinar Registered"
+
 PLUTUS_ATTENDEE_LABEL = "Plutus Webinar Attendees"
 PLUTUS_REGISTRANT_LABEL = "Plutus Webinar Registrations"
 
@@ -100,6 +107,69 @@ REGISTRATION_REQUIRED_COLUMNS = [
     "Source Name",
     "Attendance Type",
 ]
+
+
+def clean_dict(payload: Dict[str, object]) -> Dict[str, object]:
+    return {k: v for k, v in payload.items() if v not in (None, "")}
+
+
+def to_event_time(date_str: str) -> str:
+    if not date_str:
+        return datetime.now(tz=IST_TZ).isoformat()
+    for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y %I:%M:%S %p"):
+        try:
+            dt = datetime.strptime(date_str, fmt)
+            break
+        except ValueError:
+            dt = None
+    if dt is None:
+        return datetime.now(tz=IST_TZ).isoformat()
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=IST_TZ)
+    return dt.isoformat()
+
+
+def normalize_record(record: Dict[str, object]) -> Dict[str, str]:
+    normalized: Dict[str, str] = {}
+    for key, value in record.items():
+        if value is None or (isinstance(value, float) and math.isnan(value)):
+            normalized[key] = ""
+        else:
+            normalized[key] = str(value)
+    return normalized
+
+
+class WebEngageClient:
+    def __init__(self, api_key: str, license_code: str, host: str = WEBENGAGE_HOST):
+        self.api_key = api_key
+        self.license_code = license_code
+        self.host = host.rstrip("/")
+        self.session = requests.Session()
+        self.headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+    def _post(self, path: str, payload: Dict[str, object]) -> Tuple[bool, str, int]:
+        url = f"{self.host}/v1/accounts/{self.license_code}/{path.lstrip('/') }"
+        try:
+            response = self.session.post(url, headers=self.headers, json=payload, timeout=15)
+            if 200 <= response.status_code < 300:
+                return True, "OK", response.status_code
+            try:
+                body = response.json()
+                message = body.get("message") or body.get("response", {}).get("message") or str(body)
+            except ValueError:
+                message = response.text
+            return False, message, response.status_code
+        except requests.RequestException as exc:
+            return False, str(exc), 0
+
+    def upsert_user(self, payload: Dict[str, object]) -> Tuple[bool, str, int]:
+        return self._post("users", payload)
+
+    def fire_event(self, payload: Dict[str, object]) -> Tuple[bool, str, int]:
+        return self._post("events", payload)
 
 
 def read_csv_rows(raw_bytes: bytes) -> List[List[str]]:
@@ -469,6 +539,65 @@ def deduplicate_registrants(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(grouped_rows)
 
 
+def build_user_payload(record: Dict[str, str]) -> Dict[str, object]:
+    phone = record.get("Phone", "")
+    mobile = f"91{phone}" if phone else ""
+    attributes = clean_dict({
+        "originalName": record.get("User Name (Original Name)", ""),
+    })
+    payload = {
+        "userId": record.get("UserID"),
+        "email": record.get("Email") or None,
+        "firstName": record.get("First Name") or record.get("User Name (Original Name)") or None,
+        "phone": mobile or None,
+        "whatsappOptIn": True,
+        "emailOptIn": True,
+    }
+    if attributes:
+        payload["attributes"] = attributes
+    return clean_dict(payload)
+
+
+def build_attendee_event_payload(record: Dict[str, str]) -> Dict[str, object]:
+    event_data = clean_dict({
+        "WebinarName": record.get("Webinar name", ""),
+        "Conductor": record.get("Webinar conductor", ""),
+        "Product": record.get("Category", ""),
+        "JoinTime": record.get("Join Time", ""),
+        "LeaveTime": record.get("Leave Time", ""),
+        "TimeInSessionMinutes": record.get("Time in Session (minutes)", ""),
+        "UserNameOriginal": record.get("User Name (Original Name)", ""),
+        "UserEmail": record.get("Email", ""),
+        "WebinarId": record.get("Webinar ID", ""),
+    })
+    return {
+        "userId": record.get("UserID"),
+        "eventName": PLUTUS_ATTENDEE_EVENT_NAME,
+        "eventTime": to_event_time(record.get("Webinar Date", "")),
+        "eventData": event_data,
+    }
+
+
+def build_registration_event_payload(record: Dict[str, str]) -> Dict[str, object]:
+    event_data = clean_dict({
+        "WebinarName": record.get("Webinar name", ""),
+        "WebinarDate": record.get("Webinar Date", ""),
+        "RegistrationTime": record.get("Registration Time", ""),
+        "RegistrationSource": record.get("Registration Source", ""),
+        "AttendanceType": record.get("Attendance Type", ""),
+        "ApprovalStatus": record.get("Approval Status", ""),
+        "UserNameOriginal": record.get("User Name (Original Name)", ""),
+        "UserEmail": record.get("Email", ""),
+        "WebinarId": record.get("Webinar ID", ""),
+    })
+    return {
+        "userId": record.get("UserID"),
+        "eventName": PLUTUS_REGISTRATION_EVENT_NAME,
+        "eventTime": to_event_time(record.get("Webinar Date", "")),
+        "eventData": event_data,
+    }
+
+
 def parse_topic(sections: Dict[str, Dict[str, List[List[str]]]]) -> Dict[str, str]:
     if "Topic" not in sections or not sections["Topic"]["rows"]:
         return {}
@@ -696,6 +825,96 @@ def process_registration_file(
     return final_df, metadata, logs, stats
 
 
+def fire_attendee_events(df: pd.DataFrame, client: WebEngageClient) -> Dict[str, object]:
+    total = len(df)
+    summary = {
+        "total": total,
+        "success": 0,
+        "event_failures": [],
+        "user_failures": [],
+    }
+    if total == 0:
+        return summary
+
+    progress = st.progress(0)
+    records = df.to_dict(orient="records")
+    for idx, raw in enumerate(records, start=1):
+        record = normalize_record(raw)
+        user_payload = build_user_payload(record)
+        user_ok, user_msg, user_status = client.upsert_user(user_payload)
+        if not user_ok:
+            summary["user_failures"].append(
+                {
+                    "row": idx,
+                    "user_id": record.get("UserID"),
+                    "message": user_msg,
+                    "status": user_status,
+                }
+            )
+
+        event_payload = build_attendee_event_payload(record)
+        event_ok, event_msg, event_status = client.fire_event(event_payload)
+        if event_ok:
+            summary["success"] += 1
+        else:
+            summary["event_failures"].append(
+                {
+                    "row": idx,
+                    "user_id": record.get("UserID"),
+                    "message": event_msg,
+                    "status": event_status,
+                }
+            )
+        progress.progress(idx / total)
+    progress.empty()
+    return summary
+
+
+def fire_registration_events(df: pd.DataFrame, client: WebEngageClient) -> Dict[str, object]:
+    total = len(df)
+    summary = {
+        "total": total,
+        "success": 0,
+        "event_failures": [],
+        "user_failures": [],
+    }
+    if total == 0:
+        return summary
+
+    progress = st.progress(0)
+    records = df.to_dict(orient="records")
+    for idx, raw in enumerate(records, start=1):
+        record = normalize_record(raw)
+        user_payload = build_user_payload(record)
+        user_ok, user_msg, user_status = client.upsert_user(user_payload)
+        if not user_ok:
+            summary["user_failures"].append(
+                {
+                    "row": idx,
+                    "user_id": record.get("UserID"),
+                    "message": user_msg,
+                    "status": user_status,
+                }
+            )
+
+        event_payload = build_registration_event_payload(record)
+        event_ok, event_msg, event_status = client.fire_event(event_payload)
+        if event_ok:
+            summary["success"] += 1
+        else:
+            summary["event_failures"].append(
+                {
+                    "row": idx,
+                    "user_id": record.get("UserID"),
+                    "message": event_msg,
+                    "status": event_status,
+                }
+            )
+        progress.progress(idx / total)
+    progress.empty()
+    return summary
+
+
 def parse_json_config(raw: str, default: Dict[str, str]) -> Dict[str, str]:
     raw = raw.strip()
     if not raw:
@@ -742,6 +961,30 @@ def main() -> None:
         else:
             threshold = None
 
+        st.markdown("---")
+        st.subheader("WebEngage API")
+        secrets_cfg = st.secrets.get("webengage", {})
+        secret_api_key = secrets_cfg.get("api_key", "")
+        secret_license = secrets_cfg.get("license_code", "")
+        api_key_input = st.text_input(
+            "REST API Key",
+            value="",
+            type="password",
+            help="Leave blank to use st.secrets['webengage']['api_key'] if configured.",
+        )
+        license_code_input = st.text_input(
+            "License Code",
+            value="",
+            type="password",
+            help="Leave blank to use st.secrets['webengage']['license_code'] if configured.",
+        )
+
+        fire_action = st.radio(
+            "After processing",
+            ("Clean only", "Clean + fire WebEngage events"),
+            index=0,
+        )
+
     upload_label = (
         "Raw Zoom attendee CSV"
         if dataset_type == PLUTUS_ATTENDEE_LABEL
@@ -761,6 +1004,9 @@ def main() -> None:
         return
 
     approved_names = [name.strip() for name in approved_conductors.split(",") if name.strip()]
+    api_key = api_key_input or secret_api_key
+    license_code = license_code_input or secret_license
+    should_fire = fire_action == "Clean + fire WebEngage events"
 
     button_label = (
         "Process attendee file"
@@ -793,6 +1039,18 @@ def main() -> None:
             "attendee" if dataset_type == PLUTUS_ATTENDEE_LABEL else "registrant"
         )
         st.success(f"Processed {len(final_df)} clean {processed_label} records")
+
+        event_summary = None
+        if should_fire:
+            if not api_key or not license_code:
+                st.error("WebEngage API key and license code are required to fire events.")
+            else:
+                client = WebEngageClient(api_key=api_key, license_code=license_code)
+                with st.spinner("Sending data to WebEngage..."):
+                    if dataset_type == PLUTUS_ATTENDEE_LABEL:
+                        event_summary = fire_attendee_events(final_df, client)
+                    else:
+                        event_summary = fire_registration_events(final_df, client)
 
         meta_cols = st.columns(len(metadata))
         for (label, value), col in zip(metadata.items(), meta_cols):
@@ -841,6 +1099,18 @@ def main() -> None:
         conductor_warning = metadata.get("Conductor Warning")
         if conductor_warning:
             st.warning(conductor_warning)
+
+        if event_summary is not None:
+            st.subheader("WebEngage Results")
+            st.write(
+                f"Events triggered successfully: {event_summary['success']} / {event_summary['total']}"
+            )
+            if event_summary["user_failures"]:
+                st.warning("Some user upsert requests failed.")
+                st.dataframe(pd.DataFrame(event_summary["user_failures"]))
+            if event_summary["event_failures"]:
+                st.error("Some event requests failed.")
+                st.dataframe(pd.DataFrame(event_summary["event_failures"]))
 
         st.subheader("Log")
         for entry in logs:
