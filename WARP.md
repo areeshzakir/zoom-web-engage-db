@@ -10,7 +10,7 @@ This is a **Zoom Webinar Data Ingestion and Processing Project** that handles th
 
 ### Core Processing Engine (`streamlit_app.py`)
 - **Streamlit web application** providing the main user interface
-- Handles two workflows: "Webinar Attendees" and "Webinar Registrations"
+- Handles two workflows: "Plutus Webinar Attendees" and "Plutus Webinar Registrations"
 - Implements strict data validation and normalization according to SOP requirements
 - Features section-based CSV parsing (Topic, Host Details, Panelist Details, Attendee Details)
 - Deduplication logic based on phone/email priority with time aggregation rules
@@ -101,6 +101,14 @@ Maps Webinar ID to conductor name, with fallback to Panelist or Host names.
 - Sukhpreet Monga
 - Satyarth Dwivedi  
 - Khushi Gera
+
+### Plutus Branding Configuration
+The application uses branded workflow labels:
+```python
+PLUTUS_ATTENDEE_LABEL = "Plutus Webinar Attendees"
+PLUTUS_REGISTRANT_LABEL = "Plutus Webinar Registrations"
+```
+These constants control the UI labels and workflow selection in the Streamlit interface.
 
 ## Data Quality Standards
 
