@@ -633,9 +633,8 @@ def build_registration_event_payload(record: Dict[str, str]) -> Dict[str, object
     }
 
 
-def detect_bootcamp_day(metadata: Dict[str, str], fallback_date: str = "") -> Tuple[str, str, str]:
+def detect_bootcamp_day(metadata: Dict[str, str]) -> Tuple[str, str, str]:
     topic = (metadata.get("Topic") or "").lower()
-    webinar_date = metadata.get("Webinar Date", "") or fallback_date
     if "day 1" in topic or "day-1" in topic or "day1" in topic:
         day_label = "Day 1"
     elif "day 2" in topic or "day-2" in topic or "day2" in topic:
@@ -643,8 +642,6 @@ def detect_bootcamp_day(metadata: Dict[str, str], fallback_date: str = "") -> Tu
     else:
         day_label = "Unknown Day"
     display = day_label
-    if webinar_date:
-        display = f"{day_label} ({webinar_date})"
     warning = "" if day_label != "Unknown Day" else "Bootcamp day could not be inferred from webinar topic."
     return day_label, display, warning
 
@@ -653,10 +650,7 @@ def annotate_bootcamp_day(
     df: pd.DataFrame,
     metadata: Dict[str, str],
 ) -> Tuple[pd.DataFrame, Dict[str, str], str, str, str]:
-    fallback_date = ""
-    if not df.empty:
-        fallback_date = str(df.iloc[0].get("Webinar Date", ""))
-    day_label, display_label, warning = detect_bootcamp_day(metadata, fallback_date)
+    day_label, display_label, warning = detect_bootcamp_day(metadata)
     df = df.copy()
     df["Bootcamp Day"] = display_label
     metadata = dict(metadata)
