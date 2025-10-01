@@ -84,6 +84,9 @@ DEFAULT_APPROVED_CONDUCTORS = [
     "Khushi Gera",
 ]
 
+PLUTUS_ATTENDEE_LABEL = "Plutus Webinar Attendees"
+PLUTUS_REGISTRANT_LABEL = "Plutus Webinar Registrations"
+
 BOOLEAN_TRUE = {"yes", "true", "1", "y"}
 BOOLEAN_FALSE = {"no", "false", "0", "n"}
 
@@ -713,7 +716,7 @@ def main() -> None:
 
     dataset_type = st.radio(
         "Workflow",
-        ("Webinar Attendees", "Webinar Registrations"),
+        (PLUTUS_ATTENDEE_LABEL, PLUTUS_REGISTRANT_LABEL),
         horizontal=True,
     )
 
@@ -734,14 +737,14 @@ def main() -> None:
             value=", ".join(DEFAULT_APPROVED_CONDUCTORS),
             height=80,
         )
-        if dataset_type == "Webinar Attendees":
+        if dataset_type == PLUTUS_ATTENDEE_LABEL:
             threshold = st.slider("Datetime success threshold", 0.8, 1.0, 0.99, 0.01)
         else:
             threshold = None
 
     upload_label = (
         "Raw Zoom attendee CSV"
-        if dataset_type == "Webinar Attendees"
+        if dataset_type == PLUTUS_ATTENDEE_LABEL
         else "Raw Zoom registrant CSV"
     )
     uploaded = st.file_uploader(upload_label, type=["csv"])
@@ -760,13 +763,15 @@ def main() -> None:
     approved_names = [name.strip() for name in approved_conductors.split(",") if name.strip()]
 
     button_label = (
-        "Process attendee file" if dataset_type == "Webinar Attendees" else "Process registrant file"
+        "Process attendee file"
+        if dataset_type == PLUTUS_ATTENDEE_LABEL
+        else "Process registrant file"
     )
 
     if st.button(button_label, type="primary"):
         with st.spinner("Cleaning in progress..."):
             try:
-                if dataset_type == "Webinar Attendees":
+                if dataset_type == PLUTUS_ATTENDEE_LABEL:
                     final_df, metadata, logs, stats = process_uploaded_file(
                         uploaded.getvalue(),
                         category_map,
@@ -785,7 +790,7 @@ def main() -> None:
                 return
 
         processed_label = (
-            "attendee" if dataset_type == "Webinar Attendees" else "registrant"
+            "attendee" if dataset_type == PLUTUS_ATTENDEE_LABEL else "registrant"
         )
         st.success(f"Processed {len(final_df)} clean {processed_label} records")
 
@@ -798,7 +803,7 @@ def main() -> None:
 
         download_name = (
             "webengage_clean.csv"
-            if dataset_type == "Webinar Attendees"
+            if dataset_type == PLUTUS_ATTENDEE_LABEL
             else "webengage_registration_clean.csv"
         )
         csv_buffer = StringIO()
@@ -811,7 +816,7 @@ def main() -> None:
         )
 
         st.subheader("Diagnostics")
-        if dataset_type == "Webinar Attendees":
+        if dataset_type == PLUTUS_ATTENDEE_LABEL:
             join_ratio = stats.get("join_parsed", 0) / max(stats.get("join_total", 1), 1)
             leave_ratio = stats.get("leave_parsed", 0) / max(stats.get("leave_total", 1), 1)
             st.write(
