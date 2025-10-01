@@ -33,6 +33,7 @@ REQUIRED_ATTENDEE_COLUMNS = [
 
 CLEAN_SCHEMA = [
     "Webinar Date",
+    "Bootcamp Day",
     "Category",
     "Webinar ID",
     "Attended",
@@ -43,6 +44,8 @@ CLEAN_SCHEMA = [
     "Phone",
     "Registration Time",
     "Approval Status",
+    "Registration Source",
+    "Attendance Type",
     "Join Time",
     "Leave Time",
     "Time in Session (minutes)",
@@ -93,6 +96,8 @@ IST_TZ = timezone(timedelta(hours=5, minutes=30))
 
 PLUTUS_ATTENDEE_EVENT_NAME = "Plutus Webinar Attended"
 PLUTUS_REGISTRATION_EVENT_NAME = "Plutus Webinar Registered"
+PLUTUS_BOOTCAMP_ATTENDED_EVENT_NAME = "Plutus Bootcamp Attended"
+PLUTUS_BOOTCAMP_REGISTERED_EVENT_NAME = "Plutus Bootcamp Registered"
 
 
 def load_local_secrets() -> Dict[str, str]:
@@ -109,6 +114,7 @@ def load_local_secrets() -> Dict[str, str]:
 
 PLUTUS_ATTENDEE_LABEL = "Plutus Webinar Attendees"
 PLUTUS_REGISTRANT_LABEL = "Plutus Webinar Registrations"
+PLUTUS_BOOTCAMP_LABEL = "Plutus Bootcamp"
 
 BOOLEAN_TRUE = {"yes", "true", "1", "y"}
 BOOLEAN_FALSE = {"no", "false", "0", "n"}
@@ -336,8 +342,10 @@ def normalize_attendees(df: pd.DataFrame, stats: Dict[str, float]) -> pd.DataFra
         "Is Guest",
         "Country/Region Name",
         "Source Name",
+        "Attendance Type",
     ]:
-        work[column] = work[column].astype(str).map(normalize_space)
+        if column in work.columns:
+            work[column] = work[column].astype(str).map(normalize_space)
 
     for column in ["Join Time", "Leave Time", "Registration Time"]:
         work[column] = work[column].replace("--", "")
@@ -349,6 +357,10 @@ def normalize_attendees(df: pd.DataFrame, stats: Dict[str, float]) -> pd.DataFra
     work["Email"] = work["Email"].str.lower()
 
     work["Phone"] = work["Phone"].map(normalize_phone)
+    if "Source Name" in work.columns:
+        work["Registration Source"] = work["Source Name"].map(normalize_space)
+    else:
+        work["Registration Source"] = ""
 
     email_to_phone: Dict[str, str] = {}
     for email, phone in zip(work["Email"], work["Phone"]):
@@ -441,7 +453,14 @@ def aggregate_group(group: pd.DataFrame) -> Dict[str, str]:
     ]:
         result[column] = first_non_blank(group_sorted[column])
 
-    result["Source Name"] = ""
+    for column in [
+        "Registration Source",
+        "Attendance Type",
+    ]:
+        if column in group_sorted.columns:
+            result[column] = first_non_blank(group_sorted[column])
+        else:
+            result[column] = ""
     result["UserID"] = build_user_id(result["Phone"])
     return result
 
@@ -609,6 +628,79 @@ def build_registration_event_payload(record: Dict[str, str]) -> Dict[str, object
     return {
         "userId": record.get("UserID"),
         "eventName": PLUTUS_REGISTRATION_EVENT_NAME,
+        "eventTime": to_event_time(record.get("Webinar Date", "")),
+        "eventData": event_data,
+    }
+
+
+def detect_bootcamp_day(metadata: Dict[str, str], fallback_date: str = "") -> Tuple[str, str, str]:
+    topic = (metadata.get("Topic") or "").lower()
+    webinar_date = metadata.get("Webinar Date", "") or fallback_date
+    if "day 1" in topic or "day-1" in topic or "day1" in topic:
+        day_label = "Day 1"
+    elif "day 2" in topic or "day-2" in topic or "day2" in topic:
+        day_label = "Day 2"
+    else:
+        day_label = "Unknown Day"
+    display = day_label
+    if webinar_date:
+        display = f"{day_label} ({webinar_date})"
+    warning = "" if day_label != "Unknown Day" else "Bootcamp day could not be inferred from webinar topic."
+    return day_label, display, warning
+
+
+def annotate_bootcamp_day(
+    df: pd.DataFrame,
+    metadata: Dict[str, str],
+) -> Tuple[pd.DataFrame, Dict[str, str], str, str, str]:
+    fallback_date = ""
+    if not df.empty:
+        fallback_date = str(df.iloc[0].get("Webinar Date", ""))
+    day_label, display_label, warning = detect_bootcamp_day(metadata, fallback_date)
+    df = df.copy()
+    df["Bootcamp Day"] = display_label
+    metadata = dict(metadata)
+    metadata["Bootcamp Day"] = display_label
+    return df, metadata, day_label, display_label, warning
+
+
+def build_bootcamp_registration_event_payload(record: Dict[str, str], day_label: str) -> Dict[str, object]:
+    event_data = clean_dict({
+        "BootcampDay": day_label,
+        "WebinarName": record.get("Webinar name", ""),
+        "WebinarDate": record.get("Webinar Date", ""),
+        "RegistrationTime": record.get("Registration Time", ""),
+        "RegistrationSource": record.get("Registration Source", ""),
+        "AttendanceType": record.get("Attendance Type", ""),
+        "ApprovalStatus": record.get("Approval Status", ""),
+        "UserNameOriginal": record.get("User Name (Original Name)", ""),
+        "UserEmail": record.get("Email", ""),
+        "WebinarId": record.get("Webinar ID", ""),
+    })
+    return {
+        "userId": record.get("UserID"),
+        "eventName": PLUTUS_BOOTCAMP_REGISTERED_EVENT_NAME,
+        "eventTime": to_event_time(record.get("Webinar Date", "")),
+        "eventData": event_data,
+    }
+
+
+def build_bootcamp_attended_event_payload(record: Dict[str, str], day_label: str) -> Dict[str, object]:
+    event_data = clean_dict({
+        "BootcampDay": day_label,
+        "WebinarName": record.get("Webinar name", ""),
+        "Conductor": record.get("Webinar conductor", ""),
+        "Product": record.get("Category", ""),
+        "JoinTime": record.get("Join Time", ""),
+        "LeaveTime": record.get("Leave Time", ""),
+        "TimeInSessionMinutes": record.get("Time in Session (minutes)", ""),
+        "UserNameOriginal": record.get("User Name (Original Name)", ""),
+        "UserEmail": record.get("Email", ""),
+        "WebinarId": record.get("Webinar ID", ""),
+    })
+    return {
+        "userId": record.get("UserID"),
+        "eventName": PLUTUS_BOOTCAMP_ATTENDED_EVENT_NAME,
         "eventTime": to_event_time(record.get("Webinar Date", "")),
         "eventData": event_data,
     }
@@ -931,6 +1023,73 @@ def fire_registration_events(df: pd.DataFrame, client: WebEngageClient) -> Dict[
     return summary
 
 
+def fire_bootcamp_events(
+    df: pd.DataFrame,
+    client: WebEngageClient,
+    day_label: str,
+) -> Dict[str, object]:
+    total = len(df)
+    summary = {
+        "total": total,
+        "registration_success": 0,
+        "attended_success": 0,
+        "user_failures": [],
+        "registration_failures": [],
+        "attended_failures": [],
+        "bootcamp_day": day_label,
+    }
+    if total == 0:
+        return summary
+
+    progress = st.progress(0)
+    records = df.to_dict(orient="records")
+    for idx, raw in enumerate(records, start=1):
+        record = normalize_record(raw)
+        user_payload = build_user_payload(record)
+        user_ok, user_msg, user_status = client.upsert_user(user_payload)
+        if not user_ok:
+            summary["user_failures"].append(
+                {
+                    "row": idx,
+                    "user_id": record.get("UserID"),
+                    "message": user_msg,
+                    "status": user_status,
+                }
+            )
+
+        reg_payload = build_bootcamp_registration_event_payload(record, day_label)
+        reg_ok, reg_msg, reg_status = client.fire_event(reg_payload)
+        if reg_ok:
+            summary["registration_success"] += 1
+        else:
+            summary["registration_failures"].append(
+                {
+                    "row": idx,
+                    "user_id": record.get("UserID"),
+                    "message": reg_msg,
+                    "status": reg_status,
+                }
+            )
+
+        att_payload = build_bootcamp_attended_event_payload(record, day_label)
+        att_ok, att_msg, att_status = client.fire_event(att_payload)
+        if att_ok:
+            summary["attended_success"] += 1
+        else:
+            summary["attended_failures"].append(
+                {
+                    "row": idx,
+                    "user_id": record.get("UserID"),
+                    "message": att_msg,
+                    "status": att_status,
+                }
+            )
+
+        progress.progress(idx / total)
+    progress.empty()
+    return summary
+
+
 def parse_json_config(raw: str, default: Dict[str, str]) -> Dict[str, str]:
     raw = raw.strip()
     if not raw:
@@ -951,7 +1110,7 @@ def main() -> None:
 
     dataset_type = st.radio(
         "Workflow",
-        (PLUTUS_ATTENDEE_LABEL, PLUTUS_REGISTRANT_LABEL),
+        (PLUTUS_ATTENDEE_LABEL, PLUTUS_REGISTRANT_LABEL, PLUTUS_BOOTCAMP_LABEL),
         horizontal=True,
     )
 
@@ -972,7 +1131,7 @@ def main() -> None:
             value=", ".join(DEFAULT_APPROVED_CONDUCTORS),
             height=80,
         )
-        if dataset_type == PLUTUS_ATTENDEE_LABEL:
+        if dataset_type in (PLUTUS_ATTENDEE_LABEL, PLUTUS_BOOTCAMP_LABEL):
             threshold = st.slider("Datetime success threshold", 0.8, 1.0, 0.99, 0.01)
         else:
             threshold = None
@@ -1006,11 +1165,12 @@ def main() -> None:
             index=0,
         )
 
-    upload_label = (
-        "Raw Zoom attendee CSV"
-        if dataset_type == PLUTUS_ATTENDEE_LABEL
-        else "Raw Zoom registrant CSV"
-    )
+    if dataset_type == PLUTUS_ATTENDEE_LABEL:
+        upload_label = "Raw Zoom attendee CSV"
+    elif dataset_type == PLUTUS_REGISTRANT_LABEL:
+        upload_label = "Raw Zoom registrant CSV"
+    else:
+        upload_label = "Raw Zoom bootcamp attendee CSV"
     uploaded = st.file_uploader(upload_label, type=["csv"])
 
     if uploaded is None:
@@ -1029,15 +1189,19 @@ def main() -> None:
     license_code = license_code_input or secret_license
     should_fire = fire_action == "Clean + fire WebEngage events"
 
-    button_label = (
-        "Process attendee file"
-        if dataset_type == PLUTUS_ATTENDEE_LABEL
-        else "Process registrant file"
-    )
+    if dataset_type == PLUTUS_ATTENDEE_LABEL:
+        button_label = "Process attendee file"
+    elif dataset_type == PLUTUS_REGISTRANT_LABEL:
+        button_label = "Process registrant file"
+    else:
+        button_label = "Process bootcamp file"
 
     if st.button(button_label, type="primary"):
         with st.spinner("Cleaning in progress..."):
             try:
+                bootcamp_day_short = ""
+                bootcamp_day_display = ""
+                bootcamp_warning = ""
                 if dataset_type == PLUTUS_ATTENDEE_LABEL:
                     final_df, metadata, logs, stats = process_uploaded_file(
                         uploaded.getvalue(),
@@ -1046,6 +1210,16 @@ def main() -> None:
                         threshold if threshold is not None else 0.99,
                         approved_names,
                     )
+                elif dataset_type == PLUTUS_BOOTCAMP_LABEL:
+                    final_df, metadata, logs, stats = process_uploaded_file(
+                        uploaded.getvalue(),
+                        category_map,
+                        conductor_map,
+                        threshold if threshold is not None else 0.99,
+                        approved_names,
+                    )
+                    final_df, metadata, bootcamp_day_short, bootcamp_day_display, bootcamp_warning = annotate_bootcamp_day(final_df, metadata)
+                    final_df = final_df.reindex(columns=CLEAN_SCHEMA, fill_value="")
                 else:
                     final_df, metadata, logs, stats = process_registration_file(
                         uploaded.getvalue(),
@@ -1057,7 +1231,11 @@ def main() -> None:
                 return
 
         processed_label = (
-            "attendee" if dataset_type == PLUTUS_ATTENDEE_LABEL else "registrant"
+            "attendee"
+            if dataset_type == PLUTUS_ATTENDEE_LABEL
+            else "registrant"
+            if dataset_type == PLUTUS_REGISTRANT_LABEL
+            else "bootcamp attendee"
         )
         st.success(f"Processed {len(final_df)} clean {processed_label} records")
 
@@ -1070,6 +1248,8 @@ def main() -> None:
                 with st.spinner("Sending data to WebEngage..."):
                     if dataset_type == PLUTUS_ATTENDEE_LABEL:
                         event_summary = fire_attendee_events(final_df, client)
+                    elif dataset_type == PLUTUS_BOOTCAMP_LABEL:
+                        event_summary = fire_bootcamp_events(final_df, client, bootcamp_day_short)
                     else:
                         event_summary = fire_registration_events(final_df, client)
 
@@ -1080,11 +1260,12 @@ def main() -> None:
         st.subheader("Preview")
         st.dataframe(final_df, use_container_width=True)
 
-        download_name = (
-            "webengage_clean.csv"
-            if dataset_type == PLUTUS_ATTENDEE_LABEL
-            else "webengage_registration_clean.csv"
-        )
+        if dataset_type == PLUTUS_ATTENDEE_LABEL:
+            download_name = "webengage_clean.csv"
+        elif dataset_type == PLUTUS_REGISTRANT_LABEL:
+            download_name = "webengage_registration_clean.csv"
+        else:
+            download_name = "webengage_bootcamp_clean.csv"
         csv_buffer = StringIO()
         final_df.to_csv(csv_buffer, index=False)
         st.download_button(
@@ -1095,7 +1276,7 @@ def main() -> None:
         )
 
         st.subheader("Diagnostics")
-        if dataset_type == PLUTUS_ATTENDEE_LABEL:
+        if dataset_type in (PLUTUS_ATTENDEE_LABEL, PLUTUS_BOOTCAMP_LABEL):
             join_ratio = stats.get("join_parsed", 0) / max(stats.get("join_total", 1), 1)
             leave_ratio = stats.get("leave_parsed", 0) / max(stats.get("leave_total", 1), 1)
             st.write(
@@ -1120,18 +1301,38 @@ def main() -> None:
         conductor_warning = metadata.get("Conductor Warning")
         if conductor_warning:
             st.warning(conductor_warning)
+        if dataset_type == PLUTUS_BOOTCAMP_LABEL and bootcamp_warning:
+            st.warning(bootcamp_warning)
 
         if event_summary is not None:
             st.subheader("WebEngage Results")
-            st.write(
-                f"Events triggered successfully: {event_summary['success']} / {event_summary['total']}"
-            )
-            if event_summary["user_failures"]:
-                st.warning("Some user upsert requests failed.")
-                st.dataframe(pd.DataFrame(event_summary["user_failures"]))
-            if event_summary["event_failures"]:
-                st.error("Some event requests failed.")
-                st.dataframe(pd.DataFrame(event_summary["event_failures"]))
+            if dataset_type == PLUTUS_BOOTCAMP_LABEL:
+                st.write(f"Bootcamp day: {event_summary['bootcamp_day']}")
+                st.write(
+                    f"Registration events: {event_summary['registration_success']} / {event_summary['total']}"
+                )
+                st.write(
+                    f"Attended events: {event_summary['attended_success']} / {event_summary['total']}"
+                )
+                if event_summary["user_failures"]:
+                    st.warning("Some user upsert requests failed.")
+                    st.dataframe(pd.DataFrame(event_summary["user_failures"]))
+                if event_summary["registration_failures"]:
+                    st.error("Some registration events failed.")
+                    st.dataframe(pd.DataFrame(event_summary["registration_failures"]))
+                if event_summary["attended_failures"]:
+                    st.error("Some attendance events failed.")
+                    st.dataframe(pd.DataFrame(event_summary["attended_failures"]))
+            else:
+                st.write(
+                    f"Events triggered successfully: {event_summary['success']} / {event_summary['total']}"
+                )
+                if event_summary["user_failures"]:
+                    st.warning("Some user upsert requests failed.")
+                    st.dataframe(pd.DataFrame(event_summary["user_failures"]))
+                if event_summary["event_failures"]:
+                    st.error("Some event requests failed.")
+                    st.dataframe(pd.DataFrame(event_summary["event_failures"]))
 
         st.subheader("Log")
         for entry in logs:
