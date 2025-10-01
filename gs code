@@ -1,0 +1,306 @@
+//=====================================================================//
+// WebEngage: "Webinar Attended" (final, collision-safe, no errors)
+// - Works with real form submit (e provided) OR manual Run (processes last row)
+// - Unique globals (WEBINAR_*), unique helpers (wb*)
+// - Uniform variables: user_id, email, name, mobile
+//=====================================================================//
+
+// ====== EDIT THESE CONSTANTS ====== //
+const WEBINAR_SHEET_ID               = '1dq0y37E0vjXHLPB1oCEb0_Cnhfk92AXWLiao95rrLcU';
+const WEBINAR_FORM_SHEET_NAME        = 'formResponses';     // source sheet name
+const WEBINAR_RESULTS_SHEET_NAME     = 'weWebinarResults';  // output sheet name
+
+const WEBINAR_WEBENGAGE_LICENSE_CODE = '~2024b5d8'; // e.g. "~2024b5d8"
+const WEBINAR_WEBENGAGE_API_KEY      = '78ac5485-3067-4403-bb13-b367becdea16';
+
+// Toggle: also create/update user in WebEngage before firing event?
+const WEBINAR_CREATE_USERS           = true;
+
+// ====== HEADERS (must match your sheet) ====== //
+const WEBINAR_HDR_WEBINAR_DATE       = 'Webinar Date';              // eventTime source
+const WEBINAR_HDR_CATEGORY           = 'Category';                  // mapped to Product
+const WEBINAR_HDR_ATTENDED           = 'Attended';
+
+const WEBINAR_HDR_USER_NAME_ORIG     = 'User Name (Original Name)';
+const WEBINAR_HDR_FIRST_NAME         = 'First Name';
+const WEBINAR_HDR_EMAIL              = 'Email';
+const WEBINAR_HDR_PHONE              = 'Phone';
+
+const WEBINAR_HDR_JOIN_TIME          = 'Join Time';
+const WEBINAR_HDR_LEAVE_TIME         = 'Leave Time';
+const WEBINAR_HDR_TIME_MIN           = 'Time in Session (minutes)';
+
+const WEBINAR_HDR_USERID             = 'UserID';
+const WEBINAR_HDR_WEBINAR_NAME       = 'Webinar name';
+const WEBINAR_HDR_WEBINAR_CONDUCTOR  = 'Webinar conductor';
+
+//=====================================================================//
+// Helpers (prefixed with wb*)
+//=====================================================================//
+function wbFormatToRFC3339(date) {
+  return Utilities.formatDate(date, 'Asia/Kolkata', "yyyy-MM-dd'T'HH:mm:ssZ");
+}
+function wbNowIST() {
+  return Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
+}
+function wbGetByHeader(responses, headers, headerName) {
+  const idx = headers.indexOf(headerName);
+  return idx !== -1 ? responses[idx] : '';
+}
+function wbNormalize91(raw) {
+  if (!raw) return '';
+  const digits = String(raw).replace(/\D+/g, '');
+  if (!digits) return '';
+  return digits.startsWith('91') ? digits : `91${digits}`;
+}
+function wbIsAttended(val) {
+  if (val === true) return true;
+  const s = String(val || '').trim().toLowerCase();
+  return s === 'yes' || s === 'true' || s === '1' || s === 'present' || s === 'attended';
+}
+function wbParseDateLoose(v) {
+  if (!v) return null;
+  try {
+    if (Object.prototype.toString.call(v) === '[object Date]' && !isNaN(v)) return v;
+    const d = new Date(v);
+    return isNaN(d.getTime()) ? null : d;
+  } catch (_) { return null; }
+}
+function wbSafeParse(t) { try { return JSON.parse(t || '{}'); } catch (_) { return {}; } }
+
+function wbEnsureResultSheet(ss) {
+  let out = ss.getSheetByName(WEBINAR_RESULTS_SHEET_NAME);
+  if (!out) {
+    out = ss.insertSheet(WEBINAR_RESULTS_SHEET_NAME);
+    out.appendRow([
+      'When(IST)', 'user_id', 'mobile', 'email',
+      'Webinar Name', 'Conductor', 'Product(Category)',
+      'Webinar Date', 'Join Time', 'Leave Time', 'Time in Session (min)',
+      'Attended', 'User Status', 'Event Status', 'Note'
+    ]);
+  }
+  return out;
+}
+
+function wbAppendAudit(out, row) {
+  // row must be an array with exactly the header count:
+  out.appendRow(row);
+}
+
+//=====================================================================//
+// Entry point (safe): set an Installable Trigger to this on form submit
+// If run manually (no e), it processes the last row gracefully.
+//=====================================================================//
+function onWebinarFormSubmit(e) {
+  try {
+    const ss  = SpreadsheetApp.openById(WEBINAR_SHEET_ID);
+    const src = ss.getSheetByName(WEBINAR_FORM_SHEET_NAME);
+    const out = wbEnsureResultSheet(ss);
+
+    if (!src) {
+      Logger.log('Source sheet not found: ' + WEBINAR_FORM_SHEET_NAME);
+      wbAppendAudit(out, [wbNowIST(), '', '', '', '', '', '', '', '', '', '', '', 'SKIPPED', 'SKIPPED', 'Missing source sheet']);
+      return;
+    }
+
+    // Read headers
+    const lastCol = src.getLastColumn();
+    if (lastCol < 1) {
+      wbAppendAudit(out, [wbNowIST(), '', '', '', '', '', '', '', '', '', '', '', 'SKIPPED', 'SKIPPED', 'No columns in source']);
+      return;
+    }
+    const headers = src.getRange(1, 1, 1, lastCol).getValues()[0];
+
+    // Get the responses array:
+    // - If triggered by form submit, use e.values
+    // - If run manually or e missing, take the last row
+    let responses;
+    if (e && e.values && Array.isArray(e.values)) {
+      responses = e.values;
+    } else {
+      const lastRow = src.getLastRow();
+      if (lastRow < 2) {
+        wbAppendAudit(out, [wbNowIST(), '', '', '', '', '', '', '', '', '', '', '', 'SKIPPED', 'SKIPPED', 'No data rows to process']);
+        return;
+      }
+      responses = src.getRange(lastRow, 1, 1, lastCol).getValues()[0];
+    }
+
+    // ---------- Uniform variables ----------
+    const userIdFromSheet = wbGetByHeader(responses, headers, WEBINAR_HDR_USERID);
+    const mobile          = wbNormalize91(wbGetByHeader(responses, headers, WEBINAR_HDR_PHONE));  // phone → mobile
+    const email           = wbGetByHeader(responses, headers, WEBINAR_HDR_EMAIL);                 // email
+    const user_id         = (String(userIdFromSheet || '').trim()) || mobile || email;            // priority: UserID -> Phone -> Email
+
+    const firstNameSheet  = (wbGetByHeader(responses, headers, WEBINAR_HDR_FIRST_NAME) || '').toString();
+    const originalName    = (wbGetByHeader(responses, headers, WEBINAR_HDR_USER_NAME_ORIG) || '').toString();
+    const name            = (firstNameSheet && firstNameSheet.trim()) || (originalName && originalName.trim()) || '';
+
+    // Attendance gate
+    const attendedRaw = wbGetByHeader(responses, headers, WEBINAR_HDR_ATTENDED);
+    const attended    = wbIsAttended(attendedRaw);
+
+    // Webinar fields
+    const webinarName   = wbGetByHeader(responses, headers, WEBINAR_HDR_WEBINAR_NAME);
+    const conductor     = wbGetByHeader(responses, headers, WEBINAR_HDR_WEBINAR_CONDUCTOR);
+    const category      = wbGetByHeader(responses, headers, WEBINAR_HDR_CATEGORY); // → Product
+    const joinTimeStr   = wbGetByHeader(responses, headers, WEBINAR_HDR_JOIN_TIME);
+    const leaveTimeStr  = wbGetByHeader(responses, headers, WEBINAR_HDR_LEAVE_TIME);
+    const timeInMin     = wbGetByHeader(responses, headers, WEBINAR_HDR_TIME_MIN);
+    const webinarDateV  = wbGetByHeader(responses, headers, WEBINAR_HDR_WEBINAR_DATE);
+
+    if (!user_id) {
+      Logger.log('Missing user_id (UserID/Phone/Email). Skipping.');
+      wbAppendAudit(out, [
+        wbNowIST(), '', mobile, email,
+        webinarName, conductor, category,
+        webinarDateV, joinTimeStr, leaveTimeStr, timeInMin,
+        attendedRaw, 'FAILED: Missing user_id', 'SKIPPED', 'Guard: no identifier'
+      ]);
+      return;
+    }
+
+    if (!attended) {
+      Logger.log('Not attended. Skipping event.');
+      wbAppendAudit(out, [
+        wbNowIST(), user_id, mobile, email,
+        webinarName, conductor, category,
+        webinarDateV, joinTimeStr, leaveTimeStr, timeInMin,
+        attendedRaw, 'SKIPPED', 'SKIPPED: not attended', ''
+      ]);
+      return;
+    }
+
+    // eventTime strictly from Webinar Date
+    const when = wbParseDateLoose(webinarDateV) || new Date();
+    const eventTimeRFC3339 = wbFormatToRFC3339(when);
+
+    // 1) (Optional) Create/Update user — uses uniform variables
+    let userStatus = 'SKIPPED';
+    if (WEBINAR_CREATE_USERS) {
+      userStatus = wbUpsertUser(user_id, name, email, mobile, originalName);
+    }
+
+    // 2) Fire "Webinar Attended" event — uses uniform user_id
+    const eventStatus = wbFireWebinarEvent(user_id, eventTimeRFC3339, {
+      WebinarName: webinarName || '',
+      Conductor: conductor || '',
+      Product: category || '',
+      JoinTime: joinTimeStr || '',
+      LeaveTime: leaveTimeStr || '',
+      TimeInSessionMinutes: String(timeInMin || '').trim(),
+      UserNameOriginal: originalName || '',
+      UserEmail: email || ''
+    });
+
+    // 3) Audit row
+    wbAppendAudit(out, [
+      wbNowIST(), user_id, mobile, email,
+      webinarName, conductor, category,
+      webinarDateV, joinTimeStr, leaveTimeStr, timeInMin,
+      attendedRaw, userStatus, eventStatus, ''
+    ]);
+
+    Logger.log('Processed user_id=' + user_id);
+
+  } catch (err) {
+    // Final guard: never throw, always log and write an audit row
+    try {
+      const ss  = SpreadsheetApp.openById(WEBINAR_SHEET_ID);
+      const out = wbEnsureResultSheet(ss);
+      wbAppendAudit(out, [wbNowIST(), '', '', '', '', '', '', '', '', '', '', '', 'FAILED', 'FAILED', 'Exception: ' + err.message]);
+    } catch (inner) {
+      // As a last resort, just log
+      Logger.log('Unhandled error: ' + err.message);
+    }
+  }
+}
+
+//=====================================================================//
+// WebEngage calls (unique names)
+//=====================================================================//
+function wbUpsertUser(user_id, name, email, mobile, originalName) {
+  const payload = {
+    userId: user_id,
+    email: email || undefined,
+    firstName: (name && String(name).trim()) || undefined,
+    phone: mobile || undefined,
+    whatsappOptIn: true,
+    emailOptIn: true,
+    attributes: {
+      whatsappOptIn: true,
+      emailOptIn: true,
+      originalName: (originalName && String(originalName).trim()) || undefined
+    }
+  };
+
+  Logger.log('User Payload: ' + JSON.stringify(payload));
+
+  const options = {
+    method: 'POST',
+    contentType: 'application/json',
+    headers: { Authorization: `Bearer ${WEBINAR_WEBENGAGE_API_KEY}` },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  };
+
+  try {
+    const resp = UrlFetchApp.fetch(
+      `https://api.webengage.com/v1/accounts/${WEBINAR_WEBENGAGE_LICENSE_CODE}/users`,
+      options
+    );
+    const code = resp.getResponseCode();
+    const body = wbSafeParse(resp.getContentText());
+    Logger.log(`User API Code: ${code}`);
+    Logger.log(`User API Body: ${JSON.stringify(body)}`);
+
+    if (code === 200 || code === 201) {
+      const status = body.response && body.response.status;
+      return status === 'queued' ? 'User created/updated' : (status || 'OK');
+    }
+    return (body.response && (body.response.status || body.response.message)) || (body.message || 'Error');
+  } catch (err) {
+    Logger.log('User API error: ' + err.message);
+    return 'Error: ' + err.message;
+  }
+}
+
+function wbFireWebinarEvent(user_id, eventTimeRFC3339, eventData) {
+  const payload = {
+    userId: user_id,
+    eventName: 'Plutus Webinar Attended',
+    eventTime: eventTimeRFC3339,
+    eventData: eventData
+  };
+
+  Logger.log('Event Payload: ' + JSON.stringify(payload));
+
+  const options = {
+    method: 'POST',
+    contentType: 'application/json',
+    headers: { Authorization: `Bearer ${WEBINAR_WEBENGAGE_API_KEY}` },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  };
+
+  try {
+    const resp = UrlFetchApp.fetch(
+      `https://api.webengage.com/v1/accounts/${WEBINAR_WEBENGAGE_LICENSE_CODE}/events`,
+      options
+    );
+    const code = resp.getResponseCode();
+    const body = wbSafeParse(resp.getContentText());
+    Logger.log(`Event API Code: ${code}`);
+    Logger.log(`Event API Body: ${JSON.stringify(body)}`);
+
+    return (code >= 200 && code < 300)
+      ? 'Event Triggered Successfully'
+      : (body.response && (body.response.message || body.response.status)) || (body.message || 'Error');
+  } catch (err) {
+    Logger.log('Event API error: ' + err.message);
+    return 'Error: ' + err.message;
+  }
+}
+//=====================================================================//
+// END
+//=====================================================================//
