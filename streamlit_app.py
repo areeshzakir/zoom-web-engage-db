@@ -4,11 +4,14 @@ import math
 import re
 from datetime import datetime, timezone, timedelta
 from io import StringIO
+from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
 
 import pandas as pd
-import streamlit as st
 import requests
+import streamlit as st
+import tomllib
+from streamlit.errors import StreamlitSecretNotFoundError
 
 
 REQUIRED_ATTENDEE_COLUMNS = [
@@ -90,6 +93,19 @@ IST_TZ = timezone(timedelta(hours=5, minutes=30))
 
 PLUTUS_ATTENDEE_EVENT_NAME = "Plutus Webinar Attended"
 PLUTUS_REGISTRATION_EVENT_NAME = "Plutus Webinar Registered"
+
+
+def load_local_secrets() -> Dict[str, str]:
+    local_path = Path(__file__).resolve().parent / ".streamlit" / "secrets.toml"
+    if local_path.exists():
+        try:
+            with local_path.open("rb") as fh:
+                data = tomllib.load(fh)
+            cfg = data.get("webengage", {})
+            return {"api_key": cfg.get("api_key", ""), "license_code": cfg.get("license_code", "")}
+        except (OSError, tomllib.TOMLDecodeError):
+            return {"api_key": "", "license_code": ""}
+    return {"api_key": "", "license_code": ""}
 
 PLUTUS_ATTENDEE_LABEL = "Plutus Webinar Attendees"
 PLUTUS_REGISTRANT_LABEL = "Plutus Webinar Registrations"
@@ -963,7 +979,12 @@ def main() -> None:
 
         st.markdown("---")
         st.subheader("WebEngage API")
-        secrets_cfg = st.secrets.get("webengage", {})
+        try:
+            secrets_cfg = st.secrets["webengage"]
+        except (StreamlitSecretNotFoundError, KeyError):
+            secrets_cfg = {}
+        if not secrets_cfg:
+            secrets_cfg = load_local_secrets()
         secret_api_key = secrets_cfg.get("api_key", "")
         secret_license = secrets_cfg.get("license_code", "")
         api_key_input = st.text_input(
