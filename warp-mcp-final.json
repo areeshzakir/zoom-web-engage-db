@@ -1,0 +1,55 @@
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "mcp/playwright:latest"],
+      "working_directory": "/Users/classplus/Ingestion Project test"
+    },
+    "youtube-transcript": {
+      "command": "docker", 
+      "args": ["run", "-i", "--rm", "mcp/youtube-transcript:latest"],
+      "working_directory": "/Users/classplus/Ingestion Project test"
+    },
+    "render": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "mcp/render:latest"],
+      "working_directory": "/Users/classplus/Ingestion Project test"
+    },
+    "fetch": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "mcp/fetch:latest"],
+      "working_directory": "/Users/classplus/Ingestion Project test"
+    },
+    "puppeteer": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "mcp/puppeteer:latest"],
+      "working_directory": "/Users/classplus/Ingestion Project test"
+    },
+    "context7": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "mcp/context7:latest"],
+      "working_directory": "/Users/classplus/Ingestion Project test"
+    },
+    "notion": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "-e", "NOTION_API_KEY", "mcp/notion:latest"],
+      "env": {
+        "NOTION_API_KEY": "<YOUR_NOTION_API_KEY>"
+      },
+      "working_directory": "/Users/classplus/Ingestion Project test"
+    },
+    "github": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "ghcr.io/github/github-mcp-server"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "<YOUR_GITHUB_TOKEN>"
+      },
+      "working_directory": "/Users/classplus/Ingestion Project test"
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users/classplus/Ingestion Project test"],
+      "working_directory": "/Users/classplus/Ingestion Project test"
+    }
+  }
+}
