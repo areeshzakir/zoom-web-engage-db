@@ -717,9 +717,52 @@ def get_section_primary_name(section: Dict[str, List[List[str]]]) -> str:
     header = section["header"]
     rows = section["rows"]
     if "User Name (Original Name)" not in header:
+        if header and "User Name" in header:
+            idx = header.index("User Name")
+            return proper_case(rows[0][idx]) if rows else ""
         return ""
     idx = header.index("User Name (Original Name)")
     return proper_case(rows[0][idx])
+
+
+def get_all_panelist_names(section: Dict[str, List[List[str]]]) -> List[str]:
+    if not section or not section.get("rows"):
+        return []
+    header = section["header"]
+    rows = section["rows"]
+    if "User Name (Original Name)" not in header:
+        if "User Name" not in header:
+            return []
+        idx = header.index("User Name")
+    else:
+        idx = header.index("User Name (Original Name)")
+    names = []
+    for row in rows:
+        raw = row[idx] if idx < len(row) else ""
+        cleaned = proper_case(raw)
+        if cleaned and cleaned not in names:
+            names.append(cleaned)
+    return names
+
+
+def get_all_host_names(section: Dict[str, List[List[str]]]) -> List[str]:
+    if not section or not section.get("rows"):
+        return []
+    header = section["header"]
+    rows = section["rows"]
+    if "User Name (Original Name)" not in header:
+        if "User Name" not in header:
+            return []
+        idx = header.index("User Name")
+    else:
+        idx = header.index("User Name (Original Name)")
+    names = []
+    for row in rows:
+        raw = row[idx] if idx < len(row) else ""
+        cleaned = proper_case(raw)
+        if cleaned and cleaned not in names:
+            names.append(cleaned)
+    return names
 
 
 def resolve_category(topic: str, token_map: Dict[str, str]) -> str:
@@ -742,8 +785,12 @@ def enrich_metadata(
     webinar_id = topic_info.get("Webinar ID", "")
     actual_start = topic_info.get("Actual Start Time", "")
 
-    panelist_name = get_section_primary_name(sections.get("Panelist Details", {}))
-    host_name = get_section_primary_name(sections.get("Host Details", {}))
+    panelist_section = sections.get("Panelist Details", {})
+    panelist_name = get_section_primary_name(panelist_section)
+    panelist_names = get_all_panelist_names(panelist_section)
+    host_section = sections.get("Host Details", {})
+    host_name = get_section_primary_name(host_section)
+    host_names = get_all_host_names(host_section)
 
     if actual_start:
         parsed_start = pd.to_datetime(actual_start, dayfirst=True, errors="coerce")
@@ -756,14 +803,23 @@ def enrich_metadata(
         webinar_date = ""
 
     category = resolve_category(topic_title, category_map)
-    conductor = conductor_map.get(webinar_id) or panelist_name or host_name
+    if webinar_id in conductor_map:
+        conductor = conductor_map[webinar_id]
+    elif panelist_names:
+        conductor = ", ".join(panelist_names)
+    elif host_names:
+        conductor = ", ".join(host_names)
+    else:
+        conductor = panelist_name or host_name
     conductor = conductor or ""
     conductor = proper_case(conductor)
     approved_set = {name.lower() for name in approved_conductors}
-    if conductor and conductor.lower() not in approved_set:
-        conductor_warning = f"Conductor '{conductor}' not in approved list"
-    else:
-        conductor_warning = ""
+    conductor_warning = ""
+    if conductor:
+        normalized = [proper_case(name) for name in conductor.split(",") if name.strip()]
+        unapproved = [name for name in normalized if name.lower() not in approved_set]
+        if unapproved:
+            conductor_warning = f"Conductor(s) not in approved list: {', '.join(unapproved)}"
 
     df["Webinar Date"] = webinar_date
     df["Category"] = category
