@@ -299,6 +299,15 @@ def build_user_id(phone: str) -> str:
     return f"91{tail}"
 
 
+def canonicalize_name(name: str, approved_lookup: Dict[str, str]) -> str:
+    cleaned = re.sub(r"\(.*?\)", "", name).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    key = cleaned.lower()
+    if key in approved_lookup:
+        return approved_lookup[key]
+    return proper_case(cleaned)
+
+
 def normalize_bool(value: str) -> Tuple[bool, str]:
     token = (value or "").strip().lower()
     if token in BOOLEAN_TRUE:
@@ -813,11 +822,19 @@ def enrich_metadata(
         conductor = panelist_name or host_name
     conductor = conductor or ""
     conductor = proper_case(conductor)
-    approved_set = {name.lower() for name in approved_conductors}
+    approved_lookup = {name.lower(): name for name in approved_conductors}
+    approved_set = set(approved_lookup.keys())
     conductor_warning = ""
     if conductor:
-        normalized = [proper_case(name) for name in conductor.split(",") if name.strip()]
-        unapproved = [name for name in normalized if name.lower() not in approved_set]
+        raw_parts = [part.strip() for part in conductor.split(",") if part.strip()]
+        normalized_parts = []
+        for part in raw_parts:
+            canonical = canonicalize_name(part, approved_lookup)
+            normalized_parts.append(canonical)
+        primary = [part for part in normalized_parts if part.lower() in approved_set]
+        extras = [part for part in normalized_parts if part.lower() not in approved_set]
+        conductor = ", ".join(primary + extras) if primary or extras else conductor
+        unapproved = extras
         if unapproved:
             conductor_warning = f"Conductor(s) not in approved list: {', '.join(unapproved)}"
 
