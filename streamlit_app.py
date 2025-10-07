@@ -786,6 +786,7 @@ def ensure_schema(df: pd.DataFrame) -> pd.DataFrame:
     for column in CLEAN_SCHEMA:
         if column not in df.columns:
             df[column] = ""
+    df["Phone"] = df["Phone"].map(lambda v: f"91{v}" if v else "")
     df["UserID"] = df["UserID"].map(build_user_id)
     return df[CLEAN_SCHEMA]
 
@@ -830,6 +831,7 @@ def ensure_registration_schema(df: pd.DataFrame) -> pd.DataFrame:
     for column in REGISTRATION_SCHEMA:
         if column not in df.columns:
             df[column] = ""
+    df["Phone"] = df["Phone"].map(lambda v: f"91{v}" if v else "")
     df["UserID"] = df["UserID"].map(build_user_id)
     return df[REGISTRATION_SCHEMA]
 
