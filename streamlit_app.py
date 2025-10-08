@@ -100,6 +100,168 @@ PLUTUS_BOOTCAMP_ATTENDED_EVENT_NAME = "Plutus Bootcamp Attended"
 PLUTUS_BOOTCAMP_REGISTERED_EVENT_NAME = "Plutus Bootcamp Registered"
 
 
+PROFILE_REGISTRY = {
+    "Plutus": {
+        "Webinar Attended": {
+            "label": "Plutus Webinar Attended",
+            "workflow_type": "webinar_attended",
+            "event": {
+                "attended_event_name": PLUTUS_ATTENDEE_EVENT_NAME,
+                "extra_event_attributes": {"Product": "Plutus"},
+            },
+            "category_mode": "auto",
+            "default_category": None,
+            "default_category_map": DEFAULT_CATEGORY_TOKEN_MAP,
+            "default_conductor_map": DEFAULT_CONDUCTOR_MAP,
+            "approved_conductors": DEFAULT_APPROVED_CONDUCTORS,
+            "download_name": "plutus_webinar_attended.csv",
+            "button_label": "Process attendee file",
+        },
+        "Webinar Registered": {
+            "label": "Plutus Webinar Registered",
+            "workflow_type": "registration",
+            "event": {
+                "registration_event_name": PLUTUS_REGISTRATION_EVENT_NAME,
+                "extra_event_attributes": {"Product": "Plutus"},
+            },
+            "category_mode": "auto",
+            "default_category": None,
+            "default_category_map": DEFAULT_CATEGORY_TOKEN_MAP,
+            "default_conductor_map": DEFAULT_CONDUCTOR_MAP,
+            "approved_conductors": DEFAULT_APPROVED_CONDUCTORS,
+            "download_name": "plutus_webinar_registered.csv",
+            "button_label": "Process registrant file",
+            "upload_label": "Raw Zoom registrant CSV",
+        },
+        "Bootcamp": {
+            "label": "Plutus Bootcamp",
+            "workflow_type": "bootcamp_dual",
+            "event": {
+                "attended_event_name": PLUTUS_BOOTCAMP_ATTENDED_EVENT_NAME,
+                "registration_event_name": PLUTUS_BOOTCAMP_REGISTERED_EVENT_NAME,
+                "extra_event_attributes": {"Product": "Plutus", "Program": "Bootcamp"},
+            },
+            "category_mode": "fixed",
+            "default_category": "Bootcamp",
+            "category_choices": ["Bootcamp", "Plutus Bootcamp"],
+            "default_category_map": {},
+            "default_conductor_map": DEFAULT_CONDUCTOR_MAP,
+            "approved_conductors": DEFAULT_APPROVED_CONDUCTORS,
+            "download_name": "plutus_bootcamp.csv",
+            "button_label": "Process bootcamp file",
+            "upload_label": "Raw Zoom bootcamp attendee CSV",
+        },
+    },
+    "TLS": {
+        "Webinar Attended – CD": {
+            "label": "TLS Webinar Attended CD",
+            "workflow_type": "webinar_attended",
+            "event": {
+                "attended_event_name": "TLS Webinar Attended CD",
+                "extra_event_attributes": {"Product": "TLS", "Track": "Contract Drafting"},
+            },
+            "category_mode": "fixed",
+            "default_category": "TLS",
+            "category_choices": ["TLS", "Contract Drafting"],
+            "default_category_map": {},
+            "default_conductor_map": {},
+            "approved_conductors": DEFAULT_APPROVED_CONDUCTORS,
+            "download_name": "tls_webinar_attended_cd.csv",
+        },
+        "Webinar Attended – IP": {
+            "label": "TLS Webinar Attended IP",
+            "workflow_type": "webinar_attended",
+            "event": {
+                "attended_event_name": "TLS Webinar Attended IP",
+                "extra_event_attributes": {"Product": "TLS", "Track": "Intellectual Property"},
+            },
+            "category_mode": "fixed",
+            "default_category": "TLS",
+            "category_choices": ["TLS", "Intellectual Property"],
+            "default_category_map": {},
+            "default_conductor_map": {},
+            "approved_conductors": DEFAULT_APPROVED_CONDUCTORS,
+            "download_name": "tls_webinar_attended_ip.csv",
+        },
+        "Webinar Attended – MA": {
+            "label": "TLS Webinar Attended MA",
+            "workflow_type": "webinar_attended",
+            "event": {
+                "attended_event_name": "TLS Webinar Attended MA",
+                "extra_event_attributes": {"Product": "TLS", "Track": "Mergers and Acquisitions"},
+            },
+            "category_mode": "fixed",
+            "default_category": "TLS",
+            "category_choices": ["TLS", "Mergers and Acquisitions"],
+            "default_category_map": {},
+            "default_conductor_map": {},
+            "approved_conductors": DEFAULT_APPROVED_CONDUCTORS,
+            "download_name": "tls_webinar_attended_ma.csv",
+        },
+        "Webinar Attended – TF": {
+            "label": "TLS Webinar Attended TF",
+            "workflow_type": "webinar_attended",
+            "event": {
+                "attended_event_name": "TLS Webinar Attended TF",
+                "extra_event_attributes": {"Product": "TLS", "Track": "Trademark Filing"},
+            },
+            "category_mode": "fixed",
+            "default_category": "TLS",
+            "category_choices": ["TLS", "Trademark Filing"],
+            "default_category_map": {},
+            "default_conductor_map": {},
+            "approved_conductors": DEFAULT_APPROVED_CONDUCTORS,
+            "download_name": "tls_webinar_attended_tf.csv",
+        },
+        "Webinar Attended – ADR": {
+            "label": "TLS Webinar Attended ADR",
+            "workflow_type": "webinar_attended",
+            "event": {
+                "attended_event_name": "TLS Webinar Attended ADR",
+                "extra_event_attributes": {"Product": "TLS", "Track": "Alternate Dispute Resolution"},
+            },
+            "category_mode": "fixed",
+            "default_category": "TLS",
+            "category_choices": ["TLS", "Alternate Dispute Resolution"],
+            "default_category_map": {},
+            "default_conductor_map": {},
+            "approved_conductors": DEFAULT_APPROVED_CONDUCTORS,
+            "download_name": "tls_webinar_attended_adr.csv",
+        },
+        "Webinar Attended – Misc": {
+            "label": "TLS Misc Webinar",
+            "workflow_type": "webinar_attended",
+            "event": {
+                "attended_event_name": "TLS Misc Webinar Attended",
+                "extra_event_attributes": {"Product": "TLS", "Track": "Miscellaneous"},
+            },
+            "category_mode": "fixed",
+            "default_category": "TLS",
+            "category_choices": ["TLS", "Miscellaneous"],
+            "default_category_map": {},
+            "default_conductor_map": {},
+            "approved_conductors": DEFAULT_APPROVED_CONDUCTORS,
+            "download_name": "tls_misc_webinar.csv",
+        },
+        "Bootcamp – Misc": {
+            "label": "TLS Misc Bootcamp",
+            "workflow_type": "webinar_attended",
+            "event": {
+                "attended_event_name": "TLS Misc Bootcamp Attended",
+                "extra_event_attributes": {"Product": "TLS", "Track": "Bootcamp"},
+            },
+            "category_mode": "fixed",
+            "default_category": "TLS",
+            "category_choices": ["TLS", "Bootcamp"],
+            "default_category_map": {},
+            "default_conductor_map": {},
+            "approved_conductors": DEFAULT_APPROVED_CONDUCTORS,
+            "download_name": "tls_misc_bootcamp.csv",
+        },
+    },
+}
+
+
 def load_local_secrets() -> Dict[str, str]:
     local_path = Path(__file__).resolve().parent / ".streamlit" / "secrets.toml"
     if local_path.exists():
@@ -118,6 +280,18 @@ PLUTUS_BOOTCAMP_LABEL = "Plutus Bootcamp"
 
 BOOLEAN_TRUE = {"yes", "true", "1", "y"}
 BOOLEAN_FALSE = {"no", "false", "0", "n"}
+
+
+def get_product_options() -> List[str]:
+    return list(PROFILE_REGISTRY.keys())
+
+
+def get_use_case_options(product: str) -> List[str]:
+    return list(PROFILE_REGISTRY.get(product, {}).keys())
+
+
+def get_profile(product: str, use_case: str) -> Dict[str, object]:
+    return PROFILE_REGISTRY[product][use_case]
 
 REGISTRATION_REQUIRED_COLUMNS = [
     "First Name",
@@ -602,7 +776,11 @@ def build_user_payload(record: Dict[str, str]) -> Dict[str, object]:
     return clean_dict(payload)
 
 
-def build_attendee_event_payload(record: Dict[str, str]) -> Dict[str, object]:
+def build_attendee_event_payload(
+    record: Dict[str, str],
+    event_name: str,
+    extra_attrs: Dict[str, str] | None = None,
+) -> Dict[str, object]:
     event_data = clean_dict({
         "WebinarName": record.get("Webinar name", ""),
         "Conductor": record.get("Webinar conductor", ""),
@@ -614,96 +792,11 @@ def build_attendee_event_payload(record: Dict[str, str]) -> Dict[str, object]:
         "UserEmail": record.get("Email", ""),
         "WebinarId": record.get("Webinar ID", ""),
     })
+    if extra_attrs:
+        event_data.update(extra_attrs)
     return {
         "userId": record.get("UserID"),
-        "eventName": PLUTUS_ATTENDEE_EVENT_NAME,
-        "eventTime": to_event_time(record.get("Webinar Date", "")),
-        "eventData": event_data,
-    }
-
-
-def build_registration_event_payload(record: Dict[str, str]) -> Dict[str, object]:
-    event_data = clean_dict({
-        "WebinarName": record.get("Webinar name", ""),
-        "WebinarDate": record.get("Webinar Date", ""),
-        "RegistrationTime": record.get("Registration Time", ""),
-        "RegistrationSource": record.get("Registration Source", ""),
-        "AttendanceType": record.get("Attendance Type", ""),
-        "ApprovalStatus": record.get("Approval Status", ""),
-        "UserNameOriginal": record.get("User Name (Original Name)", ""),
-        "UserEmail": record.get("Email", ""),
-        "WebinarId": record.get("Webinar ID", ""),
-    })
-    return {
-        "userId": record.get("UserID"),
-        "eventName": PLUTUS_REGISTRATION_EVENT_NAME,
-        "eventTime": to_event_time(record.get("Webinar Date", "")),
-        "eventData": event_data,
-    }
-
-
-def detect_bootcamp_day(metadata: Dict[str, str]) -> Tuple[str, str, str]:
-    topic = (metadata.get("Topic") or "").lower()
-    if "day 1" in topic or "day-1" in topic or "day1" in topic:
-        day_label = "Day 1"
-    elif "day 2" in topic or "day-2" in topic or "day2" in topic:
-        day_label = "Day 2"
-    else:
-        day_label = "Unknown Day"
-    display = day_label
-    warning = "" if day_label != "Unknown Day" else "Bootcamp day could not be inferred from webinar topic."
-    return day_label, display, warning
-
-
-def annotate_bootcamp_day(
-    df: pd.DataFrame,
-    metadata: Dict[str, str],
-) -> Tuple[pd.DataFrame, Dict[str, str], str, str, str]:
-    day_label, display_label, warning = detect_bootcamp_day(metadata)
-    df = df.copy()
-    df["Bootcamp Day"] = display_label
-    metadata = dict(metadata)
-    metadata["Bootcamp Day"] = display_label
-    return df, metadata, day_label, display_label, warning
-
-
-def build_bootcamp_registration_event_payload(record: Dict[str, str], day_label: str) -> Dict[str, object]:
-    event_data = clean_dict({
-        "BootcampDay": day_label,
-        "WebinarName": record.get("Webinar name", ""),
-        "WebinarDate": record.get("Webinar Date", ""),
-        "RegistrationTime": record.get("Registration Time", ""),
-        "RegistrationSource": record.get("Registration Source", ""),
-        "AttendanceType": record.get("Attendance Type", ""),
-        "ApprovalStatus": record.get("Approval Status", ""),
-        "UserNameOriginal": record.get("User Name (Original Name)", ""),
-        "UserEmail": record.get("Email", ""),
-        "WebinarId": record.get("Webinar ID", ""),
-    })
-    return {
-        "userId": record.get("UserID"),
-        "eventName": PLUTUS_BOOTCAMP_REGISTERED_EVENT_NAME,
-        "eventTime": to_event_time(record.get("Webinar Date", "")),
-        "eventData": event_data,
-    }
-
-
-def build_bootcamp_attended_event_payload(record: Dict[str, str], day_label: str) -> Dict[str, object]:
-    event_data = clean_dict({
-        "BootcampDay": day_label,
-        "WebinarName": record.get("Webinar name", ""),
-        "Conductor": record.get("Webinar conductor", ""),
-        "Product": record.get("Category", ""),
-        "JoinTime": record.get("Join Time", ""),
-        "LeaveTime": record.get("Leave Time", ""),
-        "TimeInSessionMinutes": record.get("Time in Session (minutes)", ""),
-        "UserNameOriginal": record.get("User Name (Original Name)", ""),
-        "UserEmail": record.get("Email", ""),
-        "WebinarId": record.get("Webinar ID", ""),
-    })
-    return {
-        "userId": record.get("UserID"),
-        "eventName": PLUTUS_BOOTCAMP_ATTENDED_EVENT_NAME,
+        "eventName": event_name,
         "eventTime": to_event_time(record.get("Webinar Date", "")),
         "eventData": event_data,
     }
@@ -745,7 +838,7 @@ def get_all_panelist_names(section: Dict[str, List[List[str]]]) -> List[str]:
         idx = header.index("User Name")
     else:
         idx = header.index("User Name (Original Name)")
-    names = []
+    names: List[str] = []
     for row in rows:
         raw = row[idx] if idx < len(row) else ""
         cleaned = proper_case(raw)
@@ -765,7 +858,7 @@ def get_all_host_names(section: Dict[str, List[List[str]]]) -> List[str]:
         idx = header.index("User Name")
     else:
         idx = header.index("User Name (Original Name)")
-    names = []
+    names: List[str] = []
     for row in rows:
         raw = row[idx] if idx < len(row) else ""
         cleaned = proper_case(raw)
@@ -812,6 +905,7 @@ def enrich_metadata(
         webinar_date = ""
 
     category = resolve_category(topic_title, category_map)
+
     if webinar_id in conductor_map:
         conductor = conductor_map[webinar_id]
     elif panelist_names:
@@ -822,6 +916,7 @@ def enrich_metadata(
         conductor = panelist_name or host_name
     conductor = conductor or ""
     conductor = proper_case(conductor)
+
     approved_lookup = {name.lower(): name for name in approved_conductors}
     approved_set = set(approved_lookup.keys())
     conductor_warning = ""
@@ -907,6 +1002,323 @@ def ensure_registration_schema(df: pd.DataFrame) -> pd.DataFrame:
     df["Phone"] = df["Phone"].map(lambda v: f"91{v}" if v else "")
     df["UserID"] = df["UserID"].map(build_user_id)
     return df[REGISTRATION_SCHEMA]
+def main() -> None:
+    st.set_page_config(page_title="Webinar Attendee Cleaner", layout="wide")
+    st.title("Zoom Webinar → WebEngage Cleaner")
+    st.caption("Upload raw Zoom attendee report CSVs and export WebEngage-ready data.")
+
+    products = get_product_options()
+    if not products:
+        st.error("No products configured.")
+        return
+
+    selected_product = st.selectbox("Product", options=products)
+    use_case_options = get_use_case_options(selected_product)
+    if not use_case_options:
+        st.error("No use cases configured for the selected product.")
+        return
+
+    use_case_labels = {
+        key: PROFILE_REGISTRY[selected_product][key]["label"] for key in use_case_options
+    }
+    selected_use_case = st.selectbox(
+        "Use case",
+        options=use_case_options,
+        format_func=lambda key: use_case_labels[key],
+    )
+
+    profile = get_profile(selected_product, selected_use_case)
+    profile_label = profile["label"]
+    workflow_type = profile["workflow_type"]
+    event_config = profile.get("event", {})
+
+    category_mode = profile.get("category_mode", "auto")
+    profile_default_category_map = profile.get(
+        "default_category_map",
+        DEFAULT_CATEGORY_TOKEN_MAP if category_mode == "auto" else {},
+    )
+    default_category = profile.get("default_category")
+    default_conductor_map = profile.get("default_conductor_map", {})
+    default_approved_conductors = profile.get("approved_conductors", DEFAULT_APPROVED_CONDUCTORS)
+
+    st.subheader(f"Workflow: {profile_label}")
+
+    category_value: str | None = None
+
+    with st.sidebar:
+        st.header("Configuration")
+        if category_mode == "auto":
+            category_json = st.text_area(
+                "Category token map (JSON)",
+                value=json.dumps(profile_default_category_map, indent=2),
+                height=200,
+            )
+            category_override_enabled = st.checkbox("Override category after cleaning", value=False)
+            if category_override_enabled:
+                manual_category = st.text_input(
+                    "Custom category",
+                    value=default_category or "",
+                )
+                category_value = manual_category.strip() or None
+        else:
+            st.caption("Category token map is not required for this workflow.")
+            choices = [choice for choice in profile.get("category_choices", []) if choice]
+            if not choices:
+                choices = [default_category or "TLS"]
+            default_choice = default_category or choices[0]
+            try:
+                default_index = choices.index(default_choice)
+            except ValueError:
+                default_index = 0
+            selected_category_value = st.selectbox("Category", choices, index=default_index)
+            custom_category_enabled = st.checkbox("Use custom category", value=False)
+            if custom_category_enabled:
+                manual_category = st.text_input("Custom category", value=selected_category_value)
+                category_value = manual_category.strip() or selected_category_value
+            else:
+                category_value = selected_category_value
+            category_json = json.dumps(profile_default_category_map, indent=2)
+
+        conductor_json = st.text_area(
+            "Conductor map (Webinar ID → Name)",
+            value=json.dumps(default_conductor_map, indent=2),
+            height=160,
+        )
+        approved_conductors_input = st.text_area(
+            "Approved conductor names (comma separated)",
+            value=", ".join(default_approved_conductors),
+            height=80,
+        )
+
+        if workflow_type in ("webinar_attended", "bootcamp_dual"):
+            threshold = st.slider("Datetime success threshold", 0.8, 1.0, 0.99, 0.01)
+        else:
+            threshold = None
+
+        st.markdown("---")
+        st.subheader("WebEngage API")
+        try:
+            secrets_cfg = st.secrets["webengage"]
+        except (StreamlitSecretNotFoundError, KeyError):
+            secrets_cfg = {}
+        if not secrets_cfg:
+            secrets_cfg = load_local_secrets()
+        secret_api_key = secrets_cfg.get("api_key", "")
+        secret_license = secrets_cfg.get("license_code", "")
+        api_key_input = st.text_input(
+            "REST API Key",
+            value="",
+            type="password",
+            help="Leave blank to use st.secrets['webengage']['api_key'] if configured.",
+        )
+        license_code_input = st.text_input(
+            "License Code",
+            value="",
+            type="password",
+            help="Leave blank to use st.secrets['webengage']['license_code'] if configured.",
+        )
+
+        fire_action = st.radio(
+            "After processing",
+            ("Clean only", "Clean + fire WebEngage events"),
+            index=0,
+        )
+
+    upload_label = profile.get("upload_label") or (
+        "Raw Zoom registrant CSV" if workflow_type == "registration" else "Raw Zoom attendee CSV"
+    )
+    uploaded = st.file_uploader(upload_label, type=["csv"])
+
+    if uploaded is None:
+        st.info("Upload a raw Zoom CSV file to begin.")
+        return
+
+    try:
+        category_map = parse_json_config(category_json, profile_default_category_map)
+        conductor_map = parse_json_config(conductor_json, default_conductor_map)
+    except ValueError as err:
+        st.error(str(err))
+        return
+
+    approved_names = [name.strip() for name in approved_conductors_input.split(",") if name.strip()]
+    api_key = api_key_input or secret_api_key
+    license_code = license_code_input or secret_license
+    should_fire = fire_action == "Clean + fire WebEngage events"
+
+    button_label = profile.get("button_label", f"Process {profile_label}")
+
+    if st.button(button_label, type="primary"):
+        with st.spinner("Cleaning in progress..."):
+            try:
+                bootcamp_day_short = ""
+                bootcamp_warning = ""
+                if workflow_type in ("webinar_attended", "bootcamp_dual"):
+                    final_df, metadata, logs, stats = process_uploaded_file(
+                        uploaded.getvalue(),
+                        category_map,
+                        conductor_map,
+                        threshold if threshold is not None else 0.99,
+                        approved_names,
+                    )
+                elif workflow_type == "registration":
+                    final_df, metadata, logs, stats = process_registration_file(
+                        uploaded.getvalue(),
+                        category_map,
+                        conductor_map,
+                    )
+                else:
+                    raise ValueError(f"Unsupported workflow type: {workflow_type}")
+
+                if workflow_type == "bootcamp_dual":
+                    final_df, metadata, bootcamp_day_short, _, bootcamp_warning = annotate_bootcamp_day(final_df, metadata)
+                    final_df = final_df.reindex(columns=CLEAN_SCHEMA, fill_value="")
+
+            except Exception as err:  # pragma: no cover - user interaction
+                st.error(str(err))
+                return
+
+        if category_value:
+            if "Category" in final_df.columns:
+                final_df["Category"] = category_value
+            metadata["Derived Category"] = category_value
+
+        st.success(f"Processed {len(final_df)} records for {profile_label}")
+
+        event_summary = None
+        if should_fire:
+            if not api_key or not license_code:
+                st.error("WebEngage API key and license code are required to fire events.")
+            elif not event_config:
+                st.info("No WebEngage event configured for this workflow.")
+            else:
+                client = WebEngageClient(api_key=api_key, license_code=license_code)
+                extra = event_config.get("extra_event_attributes")
+                with st.spinner("Sending data to WebEngage..."):
+                    if workflow_type == "webinar_attended":
+                        event_summary = fire_attendee_events(
+                            final_df,
+                            client,
+                            event_config.get("attended_event_name", ""),
+                            extra,
+                        )
+                    elif workflow_type == "registration":
+                        event_summary = fire_registration_events(
+                            final_df,
+                            client,
+                            event_config.get("registration_event_name", ""),
+                            extra,
+                        )
+                    elif workflow_type == "bootcamp_dual":
+                        event_summary = fire_bootcamp_events(
+                            final_df,
+                            client,
+                            bootcamp_day_short,
+                            event_config.get("attended_event_name", PLUTUS_BOOTCAMP_ATTENDED_EVENT_NAME),
+                            event_config.get("registration_event_name", PLUTUS_BOOTCAMP_REGISTERED_EVENT_NAME),
+                            event_config.get("attended_extra_event_attributes", extra),
+                            event_config.get("registration_extra_event_attributes", extra),
+                        )
+
+        metadata_display = dict(metadata)
+        metadata_display["Workflow"] = profile_label
+        metadata_display["Product"] = selected_product
+        metadata_display["Use Case"] = use_case_labels[selected_use_case]
+        if workflow_type == "bootcamp_dual":
+            metadata_display["Registration Event"] = event_config.get("registration_event_name", "")
+            metadata_display["Attended Event"] = event_config.get("attended_event_name", "")
+            metadata_display["Bootcamp Day"] = metadata.get("Bootcamp Day", "")
+        elif workflow_type == "webinar_attended":
+            metadata_display["Event Name"] = event_config.get("attended_event_name", "")
+        elif workflow_type == "registration":
+            metadata_display["Event Name"] = event_config.get("registration_event_name", "")
+
+        if not final_df.empty and "Category" in final_df.columns:
+            metadata_display["Applied Category"] = final_df["Category"].iloc[0]
+
+        meta_cols = st.columns(len(metadata_display))
+        for (label, value), col in zip(metadata_display.items(), meta_cols):
+            col.metric(label, value or "—")
+
+        st.subheader("Preview")
+        st.dataframe(final_df, use_container_width=True)
+
+        download_name = profile.get("download_name") or f"{profile_label.lower().replace(' ', '_')}.csv"
+        csv_buffer = StringIO()
+        final_df.to_csv(csv_buffer, index=False)
+        st.download_button(
+            "Download cleaned CSV",
+            data=csv_buffer.getvalue().encode("utf-8"),
+            file_name=download_name,
+            mime="text/csv",
+        )
+
+        st.subheader("Diagnostics")
+        if workflow_type in ("webinar_attended", "bootcamp_dual"):
+            join_ratio = stats.get("join_parsed", 0) / max(stats.get("join_total", 1), 1)
+            leave_ratio = stats.get("leave_parsed", 0) / max(stats.get("leave_total", 1), 1)
+            st.write(
+                f"Join parse success: {stats.get('join_parsed', 0)} / {stats.get('join_total', 0)}"
+            )
+            st.write(
+                f"Leave parse success: {stats.get('leave_parsed', 0)} / {stats.get('leave_total', 0)}"
+            )
+            st.write(f"Join success ratio: {join_ratio:.2%}")
+            st.write(f"Leave success ratio: {leave_ratio:.2%}")
+        elif workflow_type == "registration":
+            reg_ratio = stats.get("registration_parsed", 0) / max(
+                stats.get("registration_total", 1), 1
+            )
+            st.write(
+                f"Registrations parsed: {int(stats.get('registration_parsed', 0))} / {int(stats.get('registration_total', 0))}"
+            )
+            st.write(
+                f"Deduplicated from {int(stats.get('raw_rows', 0))} to {int(stats.get('dedup_rows', 0))} rows"
+            )
+            st.write(f"Registration time parse ratio: {reg_ratio:.2%}")
+
+        invalid_phones = stats.get("invalid_phone_rows")
+        if invalid_phones:
+            st.warning(f"Dropped {int(invalid_phones)} rows with invalid phone numbers.")
+
+        conductor_warning = metadata.get("Conductor Warning")
+        if conductor_warning:
+            st.warning(conductor_warning)
+        if workflow_type == "bootcamp_dual" and bootcamp_warning:
+            st.warning(bootcamp_warning)
+
+        if event_summary is not None:
+            st.subheader("WebEngage Results")
+            if workflow_type == "bootcamp_dual":
+                st.write(
+                    f"{event_config.get('registration_event_name', 'Registration event')}: {event_summary['registration_success']} / {event_summary['total']}"
+                )
+                st.write(
+                    f"{event_config.get('attended_event_name', 'Attended event')}: {event_summary['attended_success']} / {event_summary['total']}"
+                )
+                if event_summary["user_failures"]:
+                    st.warning("Some user upsert requests failed.")
+                    st.dataframe(pd.DataFrame(event_summary["user_failures"]))
+                if event_summary["registration_failures"]:
+                    st.error("Some registration events failed.")
+                    st.dataframe(pd.DataFrame(event_summary["registration_failures"]))
+                if event_summary["attended_failures"]:
+                    st.error("Some attendance events failed.")
+                    st.dataframe(pd.DataFrame(event_summary["attended_failures"]))
+            else:
+                event_name_display = event_config.get("attended_event_name") or event_config.get("registration_event_name") or "Event"
+                st.write(
+                    f"{event_name_display}: {event_summary['success']} / {event_summary['total']}"
+                )
+                if event_summary["user_failures"]:
+                    st.warning("Some user upsert requests failed.")
+                    st.dataframe(pd.DataFrame(event_summary["user_failures"]))
+                if event_summary.get("event_failures"):
+                    st.error("Some event requests failed.")
+                    st.dataframe(pd.DataFrame(event_summary["event_failures"]))
+
+        st.subheader("Log")
+        for entry in logs:
+            st.write(entry)
 
 
 def process_uploaded_file(
@@ -1002,7 +1414,164 @@ def process_registration_file(
     return final_df, metadata, logs, stats
 
 
-def fire_attendee_events(df: pd.DataFrame, client: WebEngageClient) -> Dict[str, object]:
+def annotate_bootcamp_day(
+    df: pd.DataFrame,
+    metadata: Dict[str, str],
+) -> Tuple[pd.DataFrame, Dict[str, str], str, str, str]:
+    """
+    Annotate bootcamp day by extracting from the topic/webinar name.
+    Bootcamps are 2-day events, so this looks for "Day 1" or "Day 2" in the title.
+    Returns: (df, metadata, day_short, day_display, warning)
+    """
+    # Get the topic/webinar name from metadata or dataframe
+    topic = metadata.get("Topic", "")
+    if not topic and "Webinar name" in df.columns:
+        topic = df["Webinar name"].iloc[0] if not df.empty else ""
+    
+    if not topic:
+        return df, metadata, "", "", "Could not determine bootcamp day - no topic/title found"
+    
+    try:
+        # Search for day patterns in the topic
+        # Look for patterns like "Day 1", "Day-1", "Day1", "DAY 1", etc.
+        import re
+        
+        # Pattern to match Day 1 or Day 2 (with various formatting)
+        day_pattern = re.compile(r'[Dd]ay[\s\-_]*([12])', re.IGNORECASE)
+        match = day_pattern.search(topic)
+        
+        if match:
+            day_num = match.group(1)
+            if day_num == "1":
+                day_short = "Day1"
+                day_display = "Day 1"
+            elif day_num == "2":
+                day_short = "Day2"
+                day_display = "Day 2"
+            else:
+                # Should not happen given our pattern, but just in case
+                day_short = "Day1"
+                day_display = "Day 1"
+        else:
+            # If no day pattern found in title, try to infer from date as fallback
+            webinar_date = df["Webinar Date"].iloc[0] if not df.empty and "Webinar Date" in df.columns else ""
+            if webinar_date:
+                dt = pd.to_datetime(webinar_date, dayfirst=True, errors="coerce")
+                if not pd.isna(dt):
+                    # Weekend bootcamps: Saturday = Day 1, Sunday = Day 2
+                    if dt.dayofweek == 5:  # Saturday
+                        day_short = "Day1"
+                        day_display = "Day 1"
+                    elif dt.dayofweek == 6:  # Sunday
+                        day_short = "Day2"
+                        day_display = "Day 2"
+                    else:
+                        # Default to Day 1 if we can't determine
+                        day_short = "Day1"
+                        day_display = "Day 1"
+                        return df, metadata, day_short, day_display, f"Warning: Could not find 'Day 1' or 'Day 2' in topic '{topic}'. Defaulting to {day_display} based on date."
+                else:
+                    return df, metadata, "", "", f"Could not find 'Day 1' or 'Day 2' in topic '{topic}' and webinar date is invalid"
+            else:
+                return df, metadata, "", "", f"Could not find 'Day 1' or 'Day 2' in topic '{topic}'"
+        
+        # Add bootcamp day column
+        df["Bootcamp Day"] = day_display  # Use display version (with space) for CSV
+        metadata["Bootcamp Day"] = day_display
+        
+        return df, metadata, day_short, day_display, ""
+    except Exception as e:
+        return df, metadata, "", "", f"Error determining bootcamp day: {str(e)}"
+
+
+def build_registration_event_payload(
+    record: Dict[str, str],
+    event_name: str,
+    extra_attrs: Dict[str, str] | None = None,
+) -> Dict[str, object]:
+    """Build WebEngage event payload for registration."""
+    event_data = clean_dict({
+        "WebinarName": record.get("Webinar name", ""),
+        "WebinarId": record.get("Webinar ID", ""),
+        "Product": record.get("Category", ""),
+        "RegistrationTime": record.get("Registration Time", ""),
+        "ApprovalStatus": record.get("Approval Status", ""),
+        "UserNameOriginal": record.get("User Name (Original Name)", ""),
+        "UserEmail": record.get("Email", ""),
+        "RegistrationSource": record.get("Registration Source", ""),
+    })
+    if extra_attrs:
+        event_data.update(extra_attrs)
+    return {
+        "userId": record.get("UserID"),
+        "eventName": event_name,
+        "eventTime": to_event_time(record.get("Webinar Date", "")),
+        "eventData": event_data,
+    }
+
+
+def build_bootcamp_registration_event_payload(
+    record: Dict[str, str],
+    day_label: str,
+    event_name: str,
+    extra_attrs: Dict[str, str] | None = None,
+) -> Dict[str, object]:
+    """Build WebEngage event payload for bootcamp registration."""
+    event_data = clean_dict({
+        "WebinarName": record.get("Webinar name", ""),
+        "WebinarId": record.get("Webinar ID", ""),
+        "Product": record.get("Category", ""),
+        "BootcampDay": day_label,
+        "RegistrationTime": record.get("Registration Time", ""),
+        "ApprovalStatus": record.get("Approval Status", ""),
+        "UserNameOriginal": record.get("User Name (Original Name)", ""),
+        "UserEmail": record.get("Email", ""),
+    })
+    if extra_attrs:
+        event_data.update(extra_attrs)
+    return {
+        "userId": record.get("UserID"),
+        "eventName": event_name,
+        "eventTime": to_event_time(record.get("Webinar Date", "")),
+        "eventData": event_data,
+    }
+
+
+def build_bootcamp_attended_event_payload(
+    record: Dict[str, str],
+    day_label: str,
+    event_name: str,
+    extra_attrs: Dict[str, str] | None = None,
+) -> Dict[str, object]:
+    """Build WebEngage event payload for bootcamp attendance."""
+    event_data = clean_dict({
+        "WebinarName": record.get("Webinar name", ""),
+        "Conductor": record.get("Webinar conductor", ""),
+        "Product": record.get("Category", ""),
+        "BootcampDay": day_label,
+        "JoinTime": record.get("Join Time", ""),
+        "LeaveTime": record.get("Leave Time", ""),
+        "TimeInSessionMinutes": record.get("Time in Session (minutes)", ""),
+        "UserNameOriginal": record.get("User Name (Original Name)", ""),
+        "UserEmail": record.get("Email", ""),
+        "WebinarId": record.get("Webinar ID", ""),
+    })
+    if extra_attrs:
+        event_data.update(extra_attrs)
+    return {
+        "userId": record.get("UserID"),
+        "eventName": event_name,
+        "eventTime": to_event_time(record.get("Webinar Date", "")),
+        "eventData": event_data,
+    }
+
+
+def fire_attendee_events(
+    df: pd.DataFrame,
+    client: WebEngageClient,
+    event_name: str,
+    extra_attrs: Dict[str, str] | None = None,
+) -> Dict[str, object]:
     total = len(df)
     summary = {
         "total": total,
@@ -1029,7 +1598,7 @@ def fire_attendee_events(df: pd.DataFrame, client: WebEngageClient) -> Dict[str,
                 }
             )
 
-        event_payload = build_attendee_event_payload(record)
+        event_payload = build_attendee_event_payload(record, event_name, extra_attrs)
         event_ok, event_msg, event_status = client.fire_event(event_payload)
         if event_ok:
             summary["success"] += 1
@@ -1047,7 +1616,12 @@ def fire_attendee_events(df: pd.DataFrame, client: WebEngageClient) -> Dict[str,
     return summary
 
 
-def fire_registration_events(df: pd.DataFrame, client: WebEngageClient) -> Dict[str, object]:
+def fire_registration_events(
+    df: pd.DataFrame,
+    client: WebEngageClient,
+    event_name: str,
+    extra_attrs: Dict[str, str] | None = None,
+) -> Dict[str, object]:
     total = len(df)
     summary = {
         "total": total,
@@ -1074,7 +1648,7 @@ def fire_registration_events(df: pd.DataFrame, client: WebEngageClient) -> Dict[
                 }
             )
 
-        event_payload = build_registration_event_payload(record)
+        event_payload = build_registration_event_payload(record, event_name, extra_attrs)
         event_ok, event_msg, event_status = client.fire_event(event_payload)
         if event_ok:
             summary["success"] += 1
@@ -1096,6 +1670,10 @@ def fire_bootcamp_events(
     df: pd.DataFrame,
     client: WebEngageClient,
     day_label: str,
+    attended_event_name: str,
+    registration_event_name: str,
+    attended_extra: Dict[str, str] | None = None,
+    registration_extra: Dict[str, str] | None = None,
 ) -> Dict[str, object]:
     total = len(df)
     summary = {
@@ -1126,7 +1704,12 @@ def fire_bootcamp_events(
                 }
             )
 
-        reg_payload = build_bootcamp_registration_event_payload(record, day_label)
+        reg_payload = build_bootcamp_registration_event_payload(
+            record,
+            day_label,
+            registration_event_name,
+            registration_extra,
+        )
         reg_ok, reg_msg, reg_status = client.fire_event(reg_payload)
         if reg_ok:
             summary["registration_success"] += 1
@@ -1140,7 +1723,12 @@ def fire_bootcamp_events(
                 }
             )
 
-        att_payload = build_bootcamp_attended_event_payload(record, day_label)
+        att_payload = build_bootcamp_attended_event_payload(
+            record,
+            day_label,
+            attended_event_name,
+            attended_extra,
+        )
         att_ok, att_msg, att_status = client.fire_event(att_payload)
         if att_ok:
             summary["attended_success"] += 1
@@ -1170,242 +1758,6 @@ def parse_json_config(raw: str, default: Dict[str, str]) -> Dict[str, str]:
         return {str(k): str(v) for k, v in payload.items()}
     except ValueError as exc:  # pragma: no cover - user input
         raise ValueError("Configuration must be a JSON object") from exc
-
-
-def main() -> None:
-    st.set_page_config(page_title="Webinar Attendee Cleaner", layout="wide")
-    st.title("Zoom Webinar → WebEngage Cleaner")
-    st.caption("Upload raw Zoom attendee report CSVs and export WebEngage-ready data.")
-
-    dataset_type = st.radio(
-        "Workflow",
-        (PLUTUS_ATTENDEE_LABEL, PLUTUS_REGISTRANT_LABEL, PLUTUS_BOOTCAMP_LABEL),
-        horizontal=True,
-    )
-
-    with st.sidebar:
-        st.header("Configuration")
-        category_json = st.text_area(
-            "Category token map (JSON)",
-            value=json.dumps(DEFAULT_CATEGORY_TOKEN_MAP, indent=2),
-            height=200,
-        )
-        conductor_json = st.text_area(
-            "Conductor map (Webinar ID → Name)",
-            value=json.dumps(DEFAULT_CONDUCTOR_MAP, indent=2),
-            height=160,
-        )
-        approved_conductors = st.text_area(
-            "Approved conductor names (comma separated)",
-            value=", ".join(DEFAULT_APPROVED_CONDUCTORS),
-            height=80,
-        )
-        if dataset_type in (PLUTUS_ATTENDEE_LABEL, PLUTUS_BOOTCAMP_LABEL):
-            threshold = st.slider("Datetime success threshold", 0.8, 1.0, 0.99, 0.01)
-        else:
-            threshold = None
-
-        st.markdown("---")
-        st.subheader("WebEngage API")
-        try:
-            secrets_cfg = st.secrets["webengage"]
-        except (StreamlitSecretNotFoundError, KeyError):
-            secrets_cfg = {}
-        if not secrets_cfg:
-            secrets_cfg = load_local_secrets()
-        secret_api_key = secrets_cfg.get("api_key", "")
-        secret_license = secrets_cfg.get("license_code", "")
-        api_key_input = st.text_input(
-            "REST API Key",
-            value="",
-            type="password",
-            help="Leave blank to use st.secrets['webengage']['api_key'] if configured.",
-        )
-        license_code_input = st.text_input(
-            "License Code",
-            value="",
-            type="password",
-            help="Leave blank to use st.secrets['webengage']['license_code'] if configured.",
-        )
-
-        fire_action = st.radio(
-            "After processing",
-            ("Clean only", "Clean + fire WebEngage events"),
-            index=0,
-        )
-
-    if dataset_type == PLUTUS_ATTENDEE_LABEL:
-        upload_label = "Raw Zoom attendee CSV"
-    elif dataset_type == PLUTUS_REGISTRANT_LABEL:
-        upload_label = "Raw Zoom registrant CSV"
-    else:
-        upload_label = "Raw Zoom bootcamp attendee CSV"
-    uploaded = st.file_uploader(upload_label, type=["csv"])
-
-    if uploaded is None:
-        st.info("Upload a raw Zoom CSV file to begin.")
-        return
-
-    try:
-        category_map = parse_json_config(category_json, DEFAULT_CATEGORY_TOKEN_MAP)
-        conductor_map = parse_json_config(conductor_json, DEFAULT_CONDUCTOR_MAP)
-    except ValueError as err:
-        st.error(str(err))
-        return
-
-    approved_names = [name.strip() for name in approved_conductors.split(",") if name.strip()]
-    api_key = api_key_input or secret_api_key
-    license_code = license_code_input or secret_license
-    should_fire = fire_action == "Clean + fire WebEngage events"
-
-    if dataset_type == PLUTUS_ATTENDEE_LABEL:
-        button_label = "Process attendee file"
-    elif dataset_type == PLUTUS_REGISTRANT_LABEL:
-        button_label = "Process registrant file"
-    else:
-        button_label = "Process bootcamp file"
-
-    if st.button(button_label, type="primary"):
-        with st.spinner("Cleaning in progress..."):
-            try:
-                bootcamp_day_short = ""
-                bootcamp_day_display = ""
-                bootcamp_warning = ""
-                if dataset_type == PLUTUS_ATTENDEE_LABEL:
-                    final_df, metadata, logs, stats = process_uploaded_file(
-                        uploaded.getvalue(),
-                        category_map,
-                        conductor_map,
-                        threshold if threshold is not None else 0.99,
-                        approved_names,
-                    )
-                elif dataset_type == PLUTUS_BOOTCAMP_LABEL:
-                    final_df, metadata, logs, stats = process_uploaded_file(
-                        uploaded.getvalue(),
-                        category_map,
-                        conductor_map,
-                        threshold if threshold is not None else 0.99,
-                        approved_names,
-                    )
-                    final_df, metadata, bootcamp_day_short, bootcamp_day_display, bootcamp_warning = annotate_bootcamp_day(final_df, metadata)
-                    final_df = final_df.reindex(columns=CLEAN_SCHEMA, fill_value="")
-                else:
-                    final_df, metadata, logs, stats = process_registration_file(
-                        uploaded.getvalue(),
-                        category_map,
-                        conductor_map,
-                    )
-            except Exception as err:  # pragma: no cover - user interaction
-                st.error(str(err))
-                return
-
-        processed_label = (
-            "attendee"
-            if dataset_type == PLUTUS_ATTENDEE_LABEL
-            else "registrant"
-            if dataset_type == PLUTUS_REGISTRANT_LABEL
-            else "bootcamp attendee"
-        )
-        st.success(f"Processed {len(final_df)} clean {processed_label} records")
-
-        event_summary = None
-        if should_fire:
-            if not api_key or not license_code:
-                st.error("WebEngage API key and license code are required to fire events.")
-            else:
-                client = WebEngageClient(api_key=api_key, license_code=license_code)
-                with st.spinner("Sending data to WebEngage..."):
-                    if dataset_type == PLUTUS_ATTENDEE_LABEL:
-                        event_summary = fire_attendee_events(final_df, client)
-                    elif dataset_type == PLUTUS_BOOTCAMP_LABEL:
-                        event_summary = fire_bootcamp_events(final_df, client, bootcamp_day_short)
-                    else:
-                        event_summary = fire_registration_events(final_df, client)
-
-        meta_cols = st.columns(len(metadata))
-        for (label, value), col in zip(metadata.items(), meta_cols):
-            col.metric(label, value or "—")
-
-        st.subheader("Preview")
-        st.dataframe(final_df, use_container_width=True)
-
-        if dataset_type == PLUTUS_ATTENDEE_LABEL:
-            download_name = "webengage_clean.csv"
-        elif dataset_type == PLUTUS_REGISTRANT_LABEL:
-            download_name = "webengage_registration_clean.csv"
-        else:
-            download_name = "webengage_bootcamp_clean.csv"
-        csv_buffer = StringIO()
-        final_df.to_csv(csv_buffer, index=False)
-        st.download_button(
-            "Download cleaned CSV",
-            data=csv_buffer.getvalue().encode("utf-8"),
-            file_name=download_name,
-            mime="text/csv",
-        )
-
-        st.subheader("Diagnostics")
-        if dataset_type in (PLUTUS_ATTENDEE_LABEL, PLUTUS_BOOTCAMP_LABEL):
-            join_ratio = stats.get("join_parsed", 0) / max(stats.get("join_total", 1), 1)
-            leave_ratio = stats.get("leave_parsed", 0) / max(stats.get("leave_total", 1), 1)
-            st.write(
-                f"Join parse success: {stats.get('join_parsed', 0)} / {stats.get('join_total', 0)}"
-            )
-            st.write(
-                f"Leave parse success: {stats.get('leave_parsed', 0)} / {stats.get('leave_total', 0)}"
-            )
-            st.write(f"Join success ratio: {join_ratio:.2%}")
-            st.write(f"Leave success ratio: {leave_ratio:.2%}")
-        else:
-            reg_ratio = stats.get("registration_parsed", 0) / max(
-                stats.get("registration_total", 1), 1
-            )
-            st.write(f"Registrations parsed: {int(stats.get('registration_parsed', 0))} / {int(stats.get('registration_total', 0))}")
-            st.write(f"Deduplicated from {int(stats.get('raw_rows', 0))} to {int(stats.get('dedup_rows', 0))} rows")
-            st.write(f"Registration time parse ratio: {reg_ratio:.2%}")
-        invalid_phones = stats.get("invalid_phone_rows")
-        if invalid_phones:
-            st.warning(f"Dropped {int(invalid_phones)} rows with invalid phone numbers.")
-
-        conductor_warning = metadata.get("Conductor Warning")
-        if conductor_warning:
-            st.warning(conductor_warning)
-        if dataset_type == PLUTUS_BOOTCAMP_LABEL and bootcamp_warning:
-            st.warning(bootcamp_warning)
-
-        if event_summary is not None:
-            st.subheader("WebEngage Results")
-            if dataset_type == PLUTUS_BOOTCAMP_LABEL:
-                st.write(f"Bootcamp day: {event_summary['bootcamp_day']}")
-                st.write(
-                    f"Registration events: {event_summary['registration_success']} / {event_summary['total']}"
-                )
-                st.write(
-                    f"Attended events: {event_summary['attended_success']} / {event_summary['total']}"
-                )
-                if event_summary["user_failures"]:
-                    st.warning("Some user upsert requests failed.")
-                    st.dataframe(pd.DataFrame(event_summary["user_failures"]))
-                if event_summary["registration_failures"]:
-                    st.error("Some registration events failed.")
-                    st.dataframe(pd.DataFrame(event_summary["registration_failures"]))
-                if event_summary["attended_failures"]:
-                    st.error("Some attendance events failed.")
-                    st.dataframe(pd.DataFrame(event_summary["attended_failures"]))
-            else:
-                st.write(
-                    f"Events triggered successfully: {event_summary['success']} / {event_summary['total']}"
-                )
-                if event_summary["user_failures"]:
-                    st.warning("Some user upsert requests failed.")
-                    st.dataframe(pd.DataFrame(event_summary["user_failures"]))
-                if event_summary["event_failures"]:
-                    st.error("Some event requests failed.")
-                    st.dataframe(pd.DataFrame(event_summary["event_failures"]))
-
-        st.subheader("Log")
-        for entry in logs:
-            st.write(entry)
 
 
 if __name__ == "__main__":  # pragma: no cover - Streamlit runtime
