@@ -1,3 +1,10 @@
 __pycache__/
 .DS_Store
 .streamlit/
+gs code*
+*.csv
+*.rtf
+warp-mcp*.json
+WebEngage documentation/
+MCP.md
+WARP.md
