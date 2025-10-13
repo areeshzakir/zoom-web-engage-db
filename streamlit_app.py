@@ -415,26 +415,39 @@ def clean_dict(payload: Dict[str, object]) -> Dict[str, object]:
 def to_event_time(date_str: str) -> str:
     """Convert date string to ISO 8601 format required by WebEngage API.
     
-    WebEngage expects eventTime in ISO format: yyyy-MM-ddTHH:mm:ss+05:30
+    WebEngage expects eventTime in ISO format like JavaScript's toISOString():
+    yyyy-MM-ddTHH:mm:ss.sssZ (UTC timezone)
     """
     if not date_str or not date_str.strip():
-        # Return current time if no date is provided
-        return datetime.now(tz=IST_TZ).isoformat()
+        # Return current time using Python's isoformat() which matches JS toISOString()
+        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     
     # Try parsing with different formats
     for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y %I:%M:%S %p", "%d/%m/%Y %H:%M:%S"):
         try:
             dt = datetime.strptime(date_str.strip(), fmt)
-            # Add timezone info if not present
+            
+            # For date-only formats (first 3), set time to noon IST to avoid date boundary issues
+            if fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d"):
+                # Set to noon IST (12:00 PM) instead of midnight to avoid date changes
+                dt = dt.replace(hour=12, minute=0, second=0, microsecond=0)
+            
+            # Convert to UTC assuming input is in IST
             if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=IST_TZ)
-            return dt.isoformat()
+                # Assume the date is in IST, convert to UTC
+                dt_ist = dt.replace(tzinfo=IST_TZ)
+                dt_utc = dt_ist.astimezone(timezone.utc)
+            else:
+                dt_utc = dt.astimezone(timezone.utc)
+            
+            # Use Python's isoformat() and replace timezone with Z
+            return dt_utc.isoformat().replace("+00:00", "Z")
         except ValueError:
             continue
     
-    # If all parsing attempts fail, return current time
-    # This ensures we always have a valid ISO format date
-    return datetime.now(tz=IST_TZ).isoformat()
+    # If all parsing attempts fail, return current time in UTC
+    # Use Python's isoformat() for consistency
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def normalize_record(record: Dict[str, object]) -> Dict[str, str]:
@@ -1339,27 +1352,49 @@ def main() -> None:
                 st.info("No WebEngage event configured for this workflow.")
             else:
                 # Calculate expected processing time
+                # For webinar_attended, only count attended records
+                if workflow_type == "webinar_attended":
+                    records_to_process = len(final_df[final_df["Attended"] == "Yes"])
+                else:
+                    # For bootcamp_dual and registration, count all records
+                    records_to_process = len(final_df)
+                    
                 events_per_record = 3 if workflow_type == "bootcamp_dual" else 2
-                total_api_calls = len(final_df) * events_per_record
+                total_api_calls = records_to_process * events_per_record
                 # With rate limiting at 80 req/sec (conservative to stay under 5000/min limit)
                 expected_time_seconds = total_api_calls / 80
                 expected_time_minutes = expected_time_seconds / 60
                 
                 if expected_time_minutes > 1:
-                    st.info(f"📊 Processing {len(final_df)} records will take approximately {expected_time_minutes:.1f} minutes due to API rate limiting (5000 requests/minute limit).")
+                    st.info(f"📊 Processing {records_to_process} records will take approximately {expected_time_minutes:.1f} minutes due to API rate limiting (5000 requests/minute limit).")
                 else:
-                    st.info(f"📊 Processing {len(final_df)} records will take approximately {expected_time_seconds:.0f} seconds.")
+                    st.info(f"📊 Processing {records_to_process} records will take approximately {expected_time_seconds:.0f} seconds.")
                 
                 client = WebEngageClient(api_key=api_key, license_code=license_code)
                 extra = event_config.get("extra_event_attributes")
                 with st.spinner("Sending data to WebEngage..."):
                     if workflow_type == "webinar_attended":
-                        event_summary = fire_attendee_events(
-                            final_df,
-                            client,
-                            event_config.get("attended_event_name", ""),
-                            extra,
-                        )
+                        # Filter for only attended records (Attended = "Yes")
+                        attended_df = final_df[final_df["Attended"] == "Yes"].copy()
+                        
+                        # Show info about filtering
+                        st.info(f"📋 Filtered {len(attended_df)} attended records from {len(final_df)} total records to send to WebEngage")
+                        
+                        if len(attended_df) == 0:
+                            st.warning("No attended records (Attended = 'Yes') found to send to WebEngage")
+                            event_summary = {
+                                "total": 0,
+                                "success": 0,
+                                "event_failures": [],
+                                "user_failures": [],
+                            }
+                        else:
+                            event_summary = fire_attendee_events(
+                                attended_df,
+                                client,
+                                event_config.get("attended_event_name", ""),
+                                extra,
+                            )
                     elif workflow_type == "registration":
                         event_summary = fire_registration_events(
                             final_df,
@@ -1368,6 +1403,10 @@ def main() -> None:
                             extra,
                         )
                     elif workflow_type == "bootcamp_dual":
+                        # Bootcamp sends ALL records (both attended and not attended) 
+                        # because it needs complete funnel data (registration + attendance)
+                        st.info(f"📋 Sending all {len(final_df)} bootcamp records to WebEngage (registration + attendance events for complete funnel)")
+                        
                         event_summary = fire_bootcamp_events(
                             final_df,
                             client,
@@ -1767,7 +1806,16 @@ def fire_attendee_events(
     
     # Process records with rate limiting (80 req/sec = 4800/min)
     # Each record requires 2 API calls (user + event)
-    status_text.text(f"Processing {total} records (rate limited to ~40 records/sec)...")
+    status_text.text(f"Processing {total} attended records (rate limited to ~40 records/sec)...")
+    
+    # Debug: Show sample data for first few records to identify date issues
+    if len(records) > 0:
+        with st.expander("🔍 Debug Information", expanded=False):
+            for i in range(min(3, len(records))):
+                sample_record = normalize_record(records[i])
+                webinar_date = sample_record.get('Webinar Date', '')
+                event_time = to_event_time(webinar_date)
+                st.text(f"Record {i+1}: Webinar Date='{webinar_date}' → eventTime='{event_time}'")
     
     for idx, raw in enumerate(records, start=1):
         record = normalize_record(raw)
@@ -1788,14 +1836,18 @@ def fire_attendee_events(
         if event_ok:
             summary["success"] += 1
         else:
-            summary["event_failures"].append(
-                {
-                    "row": idx,
-                    "user_id": record.get("UserID"),
-                    "message": event_msg,
-                    "status": event_status,
-                }
-            )
+            # Enhanced error reporting for debugging
+            error_detail = {
+                "row": idx,
+                "user_id": record.get("UserID"),
+                "message": event_msg,
+                "status": event_status,
+            }
+            # Add sample payload for first few failures to help debug
+            if len(summary["event_failures"]) < 3:
+                error_detail["sample_eventTime"] = event_payload.get("eventTime", "")
+                error_detail["webinar_date"] = record.get("Webinar Date", "")
+            summary["event_failures"].append(error_detail)
         progress.progress(idx / total)
         
         # Update status every 10 records
