@@ -413,10 +413,10 @@ def clean_dict(payload: Dict[str, object]) -> Dict[str, object]:
 
 
 def to_event_time(date_str: str) -> str:
-    """Convert date string to ISO 8601 format required by WebEngage API.
+    """DEPRECATED: Not used anymore - WebEngage bulk-events API doesn't accept eventTime parameter.
     
-    WebEngage expects eventTime in ISO format like JavaScript's toISOString():
-    yyyy-MM-ddTHH:mm:ss.sssZ (UTC timezone)
+    Previously used to convert date string to ISO 8601 format. 
+    Kept for reference only. Dates are now stored in eventData.WebinarDate field.
     """
     if not date_str or not date_str.strip():
         # Return current time using Python's isoformat() which matches JS toISOString()
@@ -945,6 +945,7 @@ def build_attendee_event_payload(
         "WebinarName": record.get("Webinar name", ""),
         "Conductor": record.get("Webinar conductor", ""),
         "Product": record.get("Category", ""),
+        "WebinarDate": record.get("Webinar Date", ""),  # Store date in eventData instead
         "JoinTime": record.get("Join Time", ""),
         "LeaveTime": record.get("Leave Time", ""),
         "TimeInSessionMinutes": record.get("Time in Session (minutes)", ""),
@@ -957,7 +958,7 @@ def build_attendee_event_payload(
     return {
         "userId": record.get("UserID"),
         "eventName": event_name,
-        "eventTime": to_event_time(record.get("Webinar Date", "")),
+        # REMOVED eventTime - bulk-events API doesn't accept this parameter
         "eventData": event_data,
     }
 
@@ -1712,6 +1713,7 @@ def build_registration_event_payload(
         "WebinarName": record.get("Webinar name", ""),
         "WebinarId": record.get("Webinar ID", ""),
         "Product": record.get("Category", ""),
+        "WebinarDate": record.get("Webinar Date", ""),  # Store date in eventData instead
         "RegistrationTime": record.get("Registration Time", ""),
         "ApprovalStatus": record.get("Approval Status", ""),
         "UserNameOriginal": record.get("User Name (Original Name)", ""),
@@ -1723,7 +1725,7 @@ def build_registration_event_payload(
     return {
         "userId": record.get("UserID"),
         "eventName": event_name,
-        "eventTime": to_event_time(record.get("Webinar Date", "")),
+        # REMOVED eventTime - bulk-events API doesn't accept this parameter
         "eventData": event_data,
     }
 
@@ -1739,6 +1741,7 @@ def build_bootcamp_registration_event_payload(
         "WebinarName": record.get("Webinar name", ""),
         "WebinarId": record.get("Webinar ID", ""),
         "Product": record.get("Category", ""),
+        "WebinarDate": record.get("Webinar Date", ""),  # Store date in eventData instead
         "BootcampDay": day_label,
         "RegistrationTime": record.get("Registration Time", ""),
         "ApprovalStatus": record.get("Approval Status", ""),
@@ -1750,7 +1753,7 @@ def build_bootcamp_registration_event_payload(
     return {
         "userId": record.get("UserID"),
         "eventName": event_name,
-        "eventTime": to_event_time(record.get("Webinar Date", "")),
+        # REMOVED eventTime - bulk-events API doesn't accept this parameter
         "eventData": event_data,
     }
 
@@ -1766,6 +1769,7 @@ def build_bootcamp_attended_event_payload(
         "WebinarName": record.get("Webinar name", ""),
         "Conductor": record.get("Webinar conductor", ""),
         "Product": record.get("Category", ""),
+        "WebinarDate": record.get("Webinar Date", ""),  # Store date in eventData instead
         "BootcampDay": day_label,
         "JoinTime": record.get("Join Time", ""),
         "LeaveTime": record.get("Leave Time", ""),
@@ -1779,7 +1783,7 @@ def build_bootcamp_attended_event_payload(
     return {
         "userId": record.get("UserID"),
         "eventName": event_name,
-        "eventTime": to_event_time(record.get("Webinar Date", "")),
+        # REMOVED eventTime - bulk-events API doesn't accept this parameter
         "eventData": event_data,
     }
 
@@ -1808,14 +1812,13 @@ def fire_attendee_events(
     # Each record requires 2 API calls (user + event)
     status_text.text(f"Processing {total} attended records (rate limited to ~40 records/sec)...")
     
-    # Debug: Show sample data for first few records to identify date issues
+    # Debug: Show sample data for first few records
     if len(records) > 0:
         with st.expander("🔍 Debug Information", expanded=False):
             for i in range(min(3, len(records))):
                 sample_record = normalize_record(records[i])
                 webinar_date = sample_record.get('Webinar Date', '')
-                event_time = to_event_time(webinar_date)
-                st.text(f"Record {i+1}: Webinar Date='{webinar_date}' → eventTime='{event_time}'")
+                st.text(f"Record {i+1}: Webinar Date='{webinar_date}' (stored in eventData.WebinarDate)")
     
     for idx, raw in enumerate(records, start=1):
         record = normalize_record(raw)
@@ -1845,8 +1848,8 @@ def fire_attendee_events(
             }
             # Add sample payload for first few failures to help debug
             if len(summary["event_failures"]) < 3:
-                error_detail["sample_eventTime"] = event_payload.get("eventTime", "")
                 error_detail["webinar_date"] = record.get("Webinar Date", "")
+                error_detail["event_payload_keys"] = list(event_payload.keys())  # Show structure
             summary["event_failures"].append(error_detail)
         progress.progress(idx / total)
         
