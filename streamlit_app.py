@@ -2,6 +2,7 @@ import csv
 import json
 import math
 import re
+import time
 from datetime import datetime, timezone, timedelta
 from io import StringIO
 from pathlib import Path
@@ -412,19 +413,28 @@ def clean_dict(payload: Dict[str, object]) -> Dict[str, object]:
 
 
 def to_event_time(date_str: str) -> str:
-    if not date_str:
+    """Convert date string to ISO 8601 format required by WebEngage API.
+    
+    WebEngage expects eventTime in ISO format: yyyy-MM-ddTHH:mm:ss+05:30
+    """
+    if not date_str or not date_str.strip():
+        # Return current time if no date is provided
         return datetime.now(tz=IST_TZ).isoformat()
-    for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y %I:%M:%S %p"):
+    
+    # Try parsing with different formats
+    for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y %I:%M:%S %p", "%d/%m/%Y %H:%M:%S"):
         try:
-            dt = datetime.strptime(date_str, fmt)
-            break
+            dt = datetime.strptime(date_str.strip(), fmt)
+            # Add timezone info if not present
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=IST_TZ)
+            return dt.isoformat()
         except ValueError:
-            dt = None
-    if dt is None:
-        return datetime.now(tz=IST_TZ).isoformat()
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=IST_TZ)
-    return dt.isoformat()
+            continue
+    
+    # If all parsing attempts fail, return current time
+    # This ensures we always have a valid ISO format date
+    return datetime.now(tz=IST_TZ).isoformat()
 
 
 def normalize_record(record: Dict[str, object]) -> Dict[str, str]:
@@ -447,21 +457,56 @@ class WebEngageClient:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
+        # Rate limiting: WebEngage allows 5000 requests per minute
+        # We'll use a conservative rate of 80 requests per second (4800/min)
+        self.min_request_interval = 0.0125  # 80 requests per second
+        self.last_request_time = 0
+        self.max_retries = 3
+        self.retry_delay = 1  # Initial retry delay in seconds
 
     def _post(self, path: str, payload: Dict[str, object]) -> Tuple[bool, str, int]:
         url = f"{self.host}/v1/accounts/{self.license_code}/{path.lstrip('/') }"
-        try:
-            response = self.session.post(url, headers=self.headers, json=payload, timeout=15)
-            if 200 <= response.status_code < 300:
-                return True, "OK", response.status_code
+        
+        # Implement rate limiting
+        current_time = time.time()
+        time_since_last = current_time - self.last_request_time
+        if time_since_last < self.min_request_interval:
+            time.sleep(self.min_request_interval - time_since_last)
+        
+        # Retry logic with exponential backoff
+        for attempt in range(self.max_retries):
             try:
-                body = response.json()
-                message = body.get("message") or body.get("response", {}).get("message") or str(body)
-            except ValueError:
-                message = response.text
-            return False, message, response.status_code
-        except requests.RequestException as exc:
-            return False, str(exc), 0
+                self.last_request_time = time.time()
+                response = self.session.post(url, headers=self.headers, json=payload, timeout=15)
+                
+                if 200 <= response.status_code < 300:
+                    return True, "OK", response.status_code
+                
+                # Handle rate limiting specifically
+                if response.status_code == 429:
+                    if attempt < self.max_retries - 1:
+                        # Exponential backoff: 1s, 2s, 4s
+                        wait_time = self.retry_delay * (2 ** attempt)
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        return False, "Rate limit exceeded for the API", 429
+                
+                # Handle other errors
+                try:
+                    body = response.json()
+                    message = body.get("message") or body.get("response", {}).get("message") or str(body)
+                except ValueError:
+                    message = response.text
+                return False, message, response.status_code
+                
+            except requests.RequestException as exc:
+                if attempt < self.max_retries - 1:
+                    time.sleep(self.retry_delay * (2 ** attempt))
+                    continue
+                return False, str(exc), 0
+        
+        return False, "Max retries exceeded", 0
 
     def upsert_user(self, payload: Dict[str, object]) -> Tuple[bool, str, int]:
         return self._post("users", payload)
@@ -1293,6 +1338,18 @@ def main() -> None:
             elif not event_config:
                 st.info("No WebEngage event configured for this workflow.")
             else:
+                # Calculate expected processing time
+                events_per_record = 3 if workflow_type == "bootcamp_dual" else 2
+                total_api_calls = len(final_df) * events_per_record
+                # With rate limiting at 80 req/sec (conservative to stay under 5000/min limit)
+                expected_time_seconds = total_api_calls / 80
+                expected_time_minutes = expected_time_seconds / 60
+                
+                if expected_time_minutes > 1:
+                    st.info(f"📊 Processing {len(final_df)} records will take approximately {expected_time_minutes:.1f} minutes due to API rate limiting (5000 requests/minute limit).")
+                else:
+                    st.info(f"📊 Processing {len(final_df)} records will take approximately {expected_time_seconds:.0f} seconds.")
+                
                 client = WebEngageClient(api_key=api_key, license_code=license_code)
                 extra = event_config.get("extra_event_attributes")
                 with st.spinner("Sending data to WebEngage..."):
@@ -1399,12 +1456,24 @@ def main() -> None:
                 )
                 if event_summary["user_failures"]:
                     st.warning("Some user upsert requests failed.")
+                    # Check for rate limiting issues
+                    rate_limit_errors = [f for f in event_summary["user_failures"] if f.get("status") == 429]
+                    if rate_limit_errors:
+                        st.error(f"⚠️ {len(rate_limit_errors)} user requests hit rate limits despite automatic retries. Try processing in smaller batches.")
                     st.dataframe(pd.DataFrame(event_summary["user_failures"]))
                 if event_summary["registration_failures"]:
                     st.error("Some registration events failed.")
+                    # Check for date format issues
+                    date_format_errors = [f for f in event_summary["registration_failures"] if "date format" in f.get("message", "").lower()]
+                    if date_format_errors:
+                        st.error(f"⚠️ {len(date_format_errors)} registration events failed due to date format issues. Check that webinar dates are properly formatted.")
                     st.dataframe(pd.DataFrame(event_summary["registration_failures"]))
                 if event_summary["attended_failures"]:
                     st.error("Some attendance events failed.")
+                    # Check for date format issues
+                    date_format_errors = [f for f in event_summary["attended_failures"] if "date format" in f.get("message", "").lower()]
+                    if date_format_errors:
+                        st.error(f"⚠️ {len(date_format_errors)} attendance events failed due to date format issues. Check that webinar dates are properly formatted.")
                     st.dataframe(pd.DataFrame(event_summary["attended_failures"]))
             else:
                 event_name_display = event_config.get("attended_event_name") or event_config.get("registration_event_name") or "Event"
@@ -1413,9 +1482,17 @@ def main() -> None:
                 )
                 if event_summary["user_failures"]:
                     st.warning("Some user upsert requests failed.")
+                    # Check for rate limiting issues
+                    rate_limit_errors = [f for f in event_summary["user_failures"] if f.get("status") == 429]
+                    if rate_limit_errors:
+                        st.error(f"⚠️ {len(rate_limit_errors)} user requests hit rate limits despite automatic retries. Try processing in smaller batches.")
                     st.dataframe(pd.DataFrame(event_summary["user_failures"]))
                 if event_summary.get("event_failures"):
                     st.error("Some event requests failed.")
+                    # Check for date format issues
+                    date_format_errors = [f for f in event_summary.get("event_failures", []) if "date format" in f.get("message", "").lower()]
+                    if date_format_errors:
+                        st.error(f"⚠️ {len(date_format_errors)} events failed due to date format issues. Check that webinar dates are properly formatted.")
                     st.dataframe(pd.DataFrame(event_summary["event_failures"]))
 
         st.subheader("Log")
@@ -1685,7 +1762,13 @@ def fire_attendee_events(
         return summary
 
     progress = st.progress(0)
+    status_text = st.empty()
     records = df.to_dict(orient="records")
+    
+    # Process records with rate limiting (80 req/sec = 4800/min)
+    # Each record requires 2 API calls (user + event)
+    status_text.text(f"Processing {total} records (rate limited to ~40 records/sec)...")
+    
     for idx, raw in enumerate(records, start=1):
         record = normalize_record(raw)
         user_payload = build_user_payload(record)
@@ -1714,7 +1797,13 @@ def fire_attendee_events(
                 }
             )
         progress.progress(idx / total)
+        
+        # Update status every 10 records
+        if idx % 10 == 0 or idx == total:
+            status_text.text(f"Processed {idx}/{total} records... Success: {summary['success']}, Failures: {len(summary['event_failures'])}")
+    
     progress.empty()
+    status_text.empty()
     return summary
 
 
@@ -1735,7 +1824,12 @@ def fire_registration_events(
         return summary
 
     progress = st.progress(0)
+    status_text = st.empty()
     records = df.to_dict(orient="records")
+    
+    # Process records with rate limiting
+    status_text.text(f"Processing {total} registration records (rate limited to ~40 records/sec)...")
+    
     for idx, raw in enumerate(records, start=1):
         record = normalize_record(raw)
         user_payload = build_user_payload(record)
@@ -1764,7 +1858,13 @@ def fire_registration_events(
                 }
             )
         progress.progress(idx / total)
+        
+        # Update status every 10 records
+        if idx % 10 == 0 or idx == total:
+            status_text.text(f"Processed {idx}/{total} records... Success: {summary['success']}, Failures: {len(summary['event_failures'])}")
+    
     progress.empty()
+    status_text.empty()
     return summary
 
 
@@ -1791,7 +1891,12 @@ def fire_bootcamp_events(
         return summary
 
     progress = st.progress(0)
+    status_text = st.empty()
     records = df.to_dict(orient="records")
+    
+    # Process records with rate limiting (3 API calls per record: user + 2 events)
+    status_text.text(f"Processing {total} bootcamp records (rate limited, 3 events per record)...")
+    
     for idx, raw in enumerate(records, start=1):
         record = normalize_record(raw)
         user_payload = build_user_payload(record)
@@ -1845,7 +1950,13 @@ def fire_bootcamp_events(
             )
 
         progress.progress(idx / total)
+        
+        # Update status every 10 records
+        if idx % 10 == 0 or idx == total:
+            status_text.text(f"Processed {idx}/{total} records... Registration success: {summary['registration_success']}, Attendance success: {summary['attended_success']}")
+    
     progress.empty()
+    status_text.empty()
     return summary
 
 
