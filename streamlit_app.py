@@ -1426,9 +1426,9 @@ def main() -> None:
                             final_retry=final_retry,
                         )
                     elif workflow_type == "bootcamp_dual":
-                        # Bootcamp sends ALL records (both attended and not attended) 
-                        # because it needs complete funnel data (registration + attendance)
-                        st.info(f"📋 Sending all {len(final_df)} bootcamp records to WebEngage (registration + attendance events for complete funnel)")
+                        # Count actual attendees for accurate messaging
+                        attended_count = len(final_df[final_df["Attended"] == "Yes"]) if "Attended" in final_df.columns else len(final_df)
+                        st.info(f"📋 Sending {len(final_df)} registration events and {attended_count} attended events to WebEngage (attended events only for Attended='Yes' records)")
                         
                         event_summary = fire_bootcamp_events(
                             final_df,
@@ -1516,8 +1516,10 @@ def main() -> None:
                 st.write(
                     f"{event_config.get('registration_event_name', 'Registration event')}: {event_summary['registration_success']} / {event_summary['total']}"
                 )
+                # Show attended success out of actual attendees, not total
+                total_attended = event_summary.get('total_attended', event_summary['total'])
                 st.write(
-                    f"{event_config.get('attended_event_name', 'Attended event')}: {event_summary['attended_success']} / {event_summary['total']}"
+                    f"{event_config.get('attended_event_name', 'Attended event')}: {event_summary['attended_success']} / {total_attended}"
                 )
                 if event_summary["user_failures"]:
                     st.warning("Some user upsert requests failed.")
@@ -2052,8 +2054,13 @@ def fire_bootcamp_events(
     final_retry: bool = True,
 ) -> Dict[str, object]:
     total = len(df)
+    # Filter for actual attendees (Attended = "Yes")
+    attended_df = df[df.get("Attended", "") == "Yes"] if "Attended" in df.columns else df
+    total_attended = len(attended_df)
+    
     summary = {
         "total": total,
+        "total_attended": total_attended,  # Track actual attendees separately
         "registration_success": 0,
         "attended_success": 0,
         "user_failures": [],
@@ -2067,19 +2074,24 @@ def fire_bootcamp_events(
     progress = st.progress(0)
     status_text = st.empty()
     records = df.to_dict(orient="records")
+    attended_records = attended_df.to_dict(orient="records")
 
     if use_bulk:
-        status_text.text(f"Bulk processing {total} bootcamp records (batch={batch_size})...")
+        status_text.text(f"Bulk processing {total} registrations, {total_attended} attended (batch={batch_size})...")
+        # Build payloads for ALL users and registrations
         users = [build_user_payload(normalize_record(r)) for r in records]
         regs = [build_bootcamp_registration_event_payload(normalize_record(r), day_label, registration_event_name, registration_extra) for r in records]
-        atts = [build_bootcamp_attended_event_payload(normalize_record(r), day_label, attended_event_name, attended_extra) for r in records]
+        # Build attended payloads ONLY for attended records
+        atts = [build_bootcamp_attended_event_payload(normalize_record(r), day_label, attended_event_name, attended_extra) for r in attended_records]
+        # Process registrations (all records)
         i = 0
         dyn_batch = max(5, int(batch_size))
         while i < total:
             end = min(i + dyn_batch, total)
             u_batch = users[i:end]
             r_batch = regs[i:end]
-            a_batch = atts[i:end]
+            
+            # Upsert users
             u_ok, u_msg, u_status = client.bulk_upsert_users(u_batch)
             if not u_ok:
                 if u_status == 429 and dyn_batch > 5:
@@ -2091,6 +2103,8 @@ def fire_bootcamp_events(
                     ok, msg, stc = client.upsert_user(build_user_payload(normalize_record(r)))
                     if not ok:
                         summary["user_failures"].append({"row": j, "user_id": r.get("UserID"), "message": msg, "status": stc})
+            
+            # Fire registration events for ALL records
             r_ok, r_msg, r_status = client.bulk_fire_events(r_batch)
             if not r_ok:
                 if r_status == 429 and dyn_batch > 5:
@@ -2107,70 +2121,110 @@ def fire_bootcamp_events(
                         summary["registration_failures"].append({"row": j, "user_id": r.get("UserID"), "message": msg, "status": stc})
             else:
                 summary["registration_success"] += len(r_batch)
-            a_ok, a_msg, a_status = client.bulk_fire_events(a_batch)
-            if not a_ok:
-                if a_status == 429 and dyn_batch > 5:
-                    dyn_batch = max(5, dyn_batch // 2)
-                    status_text.text(f"429 on attended events; reducing batch to {dyn_batch} and retrying after backoff...")
-                    time.sleep(5)
-                    continue
-                for j, r in enumerate(records[i:end], start=i+1):
-                    payload = build_bootcamp_attended_event_payload(normalize_record(r), day_label, attended_event_name, attended_extra)
-                    ok, msg, stc = client.fire_event(payload)
-                    if ok:
-                        summary["attended_success"] += 1
-                    else:
-                        summary["attended_failures"].append({"row": j, "user_id": r.get("UserID"), "message": msg, "status": stc})
-            else:
-                summary["attended_success"] += len(a_batch)
+            
             i = end
             progress.progress(i / total)
             if i % max(10, dyn_batch) == 0 or i == total:
-                status_text.text(f"Processed {i}/{total} records... Registration success: {summary['registration_success']}, Attendance success: {summary['attended_success']} (batch={dyn_batch})")
-        if final_retry:
-            # retry 429s
-            for key, builder in [("registration_failures", lambda r: build_bootcamp_registration_event_payload(normalize_record(r), day_label, registration_event_name, registration_extra)),
-                                 ("attended_failures", lambda r: build_bootcamp_attended_event_payload(normalize_record(r), day_label, attended_event_name, attended_extra))]:
-                pend = [f for f in summary[key] if f.get("status") == 429]
-                if pend:
-                    time.sleep(10)
-                    still: List[Dict[str, object]] = []
-                    for f in pend:
-                        idx = int(f.get("row", 0)) - 1
-                        payload = builder(records[idx])
+                status_text.text(f"Processed {i}/{total} registrations... Registration success: {summary['registration_success']} (batch={dyn_batch})")
+        
+        # Process attended events separately (only for attended records)
+        if total_attended > 0:
+            status_text.text(f"Processing {total_attended} attended events...")
+            i_att = 0
+            dyn_batch_att = max(5, int(batch_size))
+            while i_att < total_attended:
+                end_att = min(i_att + dyn_batch_att, total_attended)
+                a_batch = atts[i_att:end_att]
+                
+                # Fire attended events ONLY for attended records
+                a_ok, a_msg, a_status = client.bulk_fire_events(a_batch)
+                if not a_ok:
+                    if a_status == 429 and dyn_batch_att > 5:
+                        dyn_batch_att = max(5, dyn_batch_att // 2)
+                        status_text.text(f"429 on attended events; reducing batch to {dyn_batch_att} and retrying after backoff...")
+                        time.sleep(5)
+                        continue
+                    # Fallback to individual calls for this batch
+                    for j, r in enumerate(attended_records[i_att:end_att], start=i_att+1):
+                        payload = build_bootcamp_attended_event_payload(normalize_record(r), day_label, attended_event_name, attended_extra)
                         ok, msg, stc = client.fire_event(payload)
                         if ok:
-                            if key == "registration_failures":
-                                summary["registration_success"] += 1
-                            else:
-                                summary["attended_success"] += 1
+                            summary["attended_success"] += 1
+                        else:
+                            # Note: row number here refers to position in attended_df
+                            summary["attended_failures"].append({"row": j, "user_id": r.get("UserID"), "message": msg, "status": stc})
+                else:
+                    summary["attended_success"] += len(a_batch)
+                
+                i_att = end_att
+                if i_att % max(10, dyn_batch_att) == 0 or i_att == total_attended:
+                    status_text.text(f"Processed {i_att}/{total_attended} attended events... Attended success: {summary['attended_success']} (batch={dyn_batch_att})")
+        if final_retry:
+            # retry 429s for registrations
+            reg_429s = [f for f in summary["registration_failures"] if f.get("status") == 429]
+            if reg_429s:
+                time.sleep(10)
+                still: List[Dict[str, object]] = []
+                for f in reg_429s:
+                    idx = int(f.get("row", 0)) - 1
+                    payload = build_bootcamp_registration_event_payload(
+                        normalize_record(records[idx]), day_label, registration_event_name, registration_extra
+                    )
+                    ok, msg, stc = client.fire_event(payload)
+                    if ok:
+                        summary["registration_success"] += 1
+                    else:
+                        still.append({"row": f["row"], "user_id": f.get("user_id"), "message": msg, "status": stc})
+                summary["registration_failures"] = [f for f in summary["registration_failures"] if f.get("status") != 429] + still
+            
+            # retry 429s for attended events (using attended_records)
+            att_429s = [f for f in summary["attended_failures"] if f.get("status") == 429]
+            if att_429s:
+                time.sleep(10)
+                still: List[Dict[str, object]] = []
+                for f in att_429s:
+                    idx = int(f.get("row", 0)) - 1
+                    # Note: row index refers to attended_records, not all records
+                    if idx < len(attended_records):
+                        payload = build_bootcamp_attended_event_payload(
+                            normalize_record(attended_records[idx]), day_label, attended_event_name, attended_extra
+                        )
+                        ok, msg, stc = client.fire_event(payload)
+                        if ok:
+                            summary["attended_success"] += 1
                         else:
                             still.append({"row": f["row"], "user_id": f.get("user_id"), "message": msg, "status": stc})
-                    summary[key] = [f for f in summary[key] if f.get("status") != 429] + still
+                summary["attended_failures"] = [f for f in summary["attended_failures"] if f.get("status") != 429] + still
     else:
         # Non-bulk path
-        status_text.text(f"Processing {total} bootcamp records (rate limited, 3 events per record)...")
+        status_text.text(f"Processing {total} registrations, {total_attended} attended (rate limited)...")
         for idx, raw in enumerate(records, start=1):
             record = normalize_record(raw)
             user_payload = build_user_payload(record)
             user_ok, user_msg, user_status = client.upsert_user(user_payload)
             if not user_ok:
                 summary["user_failures"].append({"row": idx, "user_id": record.get("UserID"), "message": user_msg, "status": user_status})
+            
+            # Fire registration event for ALL records
             reg_payload = build_bootcamp_registration_event_payload(record, day_label, registration_event_name, registration_extra)
             reg_ok, reg_msg, reg_status = client.fire_event(reg_payload)
             if reg_ok:
                 summary["registration_success"] += 1
             else:
                 summary["registration_failures"].append({"row": idx, "user_id": record.get("UserID"), "message": reg_msg, "status": reg_status})
-            att_payload = build_bootcamp_attended_event_payload(record, day_label, attended_event_name, attended_extra)
-            att_ok, att_msg, att_status = client.fire_event(att_payload)
-            if att_ok:
-                summary["attended_success"] += 1
-            else:
-                summary["attended_failures"].append({"row": idx, "user_id": record.get("UserID"), "message": att_msg, "status": att_status})
+            
+            # Fire attended event ONLY if Attended="Yes"
+            if raw.get("Attended") == "Yes":
+                att_payload = build_bootcamp_attended_event_payload(record, day_label, attended_event_name, attended_extra)
+                att_ok, att_msg, att_status = client.fire_event(att_payload)
+                if att_ok:
+                    summary["attended_success"] += 1
+                else:
+                    summary["attended_failures"].append({"row": idx, "user_id": record.get("UserID"), "message": att_msg, "status": att_status})
+            
             progress.progress(idx / total)
             if idx % 10 == 0 or idx == total:
-                status_text.text(f"Processed {idx}/{total} records... Registration success: {summary['registration_success']}, Attendance success: {summary['attended_success']}")
+                status_text.text(f"Processed {idx}/{total} records... Registration: {summary['registration_success']}/{total}, Attended: {summary['attended_success']}/{total_attended}")
     
     progress.empty()
     status_text.empty()
