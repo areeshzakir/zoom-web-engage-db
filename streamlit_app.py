@@ -527,6 +527,13 @@ class WebEngageClient:
     def fire_event(self, payload: Dict[str, object]) -> Tuple[bool, str, int]:
         return self._post("events", payload)
 
+    # Bulk endpoints
+    def bulk_upsert_users(self, users: List[Dict[str, object]]) -> Tuple[bool, str, int]:
+        return self._post("bulk-users", {"users": users})
+
+    def bulk_fire_events(self, events: List[Dict[str, object]]) -> Tuple[bool, str, int]:
+        return self._post("bulk-events", {"events": events})
+
 
 def read_csv_rows(raw_bytes: bytes) -> List[List[str]]:
     text = raw_bytes.decode("utf-8-sig", errors="replace")
@@ -1285,6 +1292,10 @@ def main() -> None:
             index=0,
         )
 
+        use_bulk = st.checkbox("Use bulk API (recommended)", value=True)
+        bulk_batch_size = st.slider("Bulk batch size", min_value=10, max_value=50, value=25, step=5)
+        final_retry = st.checkbox("Final cool-down retry for 429s", value=True)
+
     upload_label = profile.get("upload_label") or (
         "Raw Zoom registrant CSV" if workflow_type == "registration" else "Raw Zoom attendee CSV"
     )
@@ -1360,16 +1371,21 @@ def main() -> None:
                     # For bootcamp_dual and registration, count all records
                     records_to_process = len(final_df)
                     
-                events_per_record = 3 if workflow_type == "bootcamp_dual" else 2
-                total_api_calls = records_to_process * events_per_record
-                # With rate limiting at 80 req/sec (conservative to stay under 5000/min limit)
-                expected_time_seconds = total_api_calls / 80
-                expected_time_minutes = expected_time_seconds / 60
-                
-                if expected_time_minutes > 1:
-                    st.info(f"📊 Processing {records_to_process} records will take approximately {expected_time_minutes:.1f} minutes due to API rate limiting (5000 requests/minute limit).")
+                if use_bulk:
+                    per_batch_calls = 3 if workflow_type == "bootcamp_dual" else 2
+                    batches = max(1, math.ceil(records_to_process / bulk_batch_size))
+                    total_api_calls = batches * per_batch_calls
+                    est_seconds = total_api_calls * 0.5  # ~0.5s/request incl. network
+                    st.info(f"📊 Bulk mode: {batches} batch(es) × {per_batch_calls} request(s) each ≈ {total_api_calls} calls (~{est_seconds:.0f}s).")
                 else:
-                    st.info(f"📊 Processing {records_to_process} records will take approximately {expected_time_seconds:.0f} seconds.")
+                    events_per_record = 3 if workflow_type == "bootcamp_dual" else 2
+                    total_api_calls = records_to_process * events_per_record
+                    expected_time_seconds = total_api_calls / 80
+                    expected_time_minutes = expected_time_seconds / 60
+                    if expected_time_minutes > 1:
+                        st.info(f"📊 Processing {records_to_process} records will take approximately {expected_time_minutes:.1f} minutes due to API rate limiting (5000 requests/minute limit).")
+                    else:
+                        st.info(f"📊 Processing {records_to_process} records will take approximately {expected_time_seconds:.0f} seconds.")
                 
                 client = WebEngageClient(api_key=api_key, license_code=license_code)
                 extra = event_config.get("extra_event_attributes")
@@ -1395,6 +1411,9 @@ def main() -> None:
                                 client,
                                 event_config.get("attended_event_name", ""),
                                 extra,
+                                use_bulk=use_bulk,
+                                batch_size=bulk_batch_size,
+                                final_retry=final_retry,
                             )
                     elif workflow_type == "registration":
                         event_summary = fire_registration_events(
@@ -1402,6 +1421,9 @@ def main() -> None:
                             client,
                             event_config.get("registration_event_name", ""),
                             extra,
+                            use_bulk=use_bulk,
+                            batch_size=bulk_batch_size,
+                            final_retry=final_retry,
                         )
                     elif workflow_type == "bootcamp_dual":
                         # Bootcamp sends ALL records (both attended and not attended) 
@@ -1416,6 +1438,9 @@ def main() -> None:
                             event_config.get("registration_event_name", PLUTUS_BOOTCAMP_REGISTERED_EVENT_NAME),
                             event_config.get("attended_extra_event_attributes", extra),
                             event_config.get("registration_extra_event_attributes", extra),
+                            use_bulk=use_bulk,
+                            batch_size=bulk_batch_size,
+                            final_retry=final_retry,
                         )
 
         metadata_display = dict(metadata)
@@ -1793,6 +1818,10 @@ def fire_attendee_events(
     client: WebEngageClient,
     event_name: str,
     extra_attrs: Dict[str, str] | None = None,
+    *,
+    use_bulk: bool = False,
+    batch_size: int = 25,
+    final_retry: bool = True,
 ) -> Dict[str, object]:
     total = len(df)
     summary = {
@@ -1807,55 +1836,99 @@ def fire_attendee_events(
     progress = st.progress(0)
     status_text = st.empty()
     records = df.to_dict(orient="records")
-    
-    # Process records with rate limiting (80 req/sec = 4800/min)
-    # Each record requires 2 API calls (user + event)
-    status_text.text(f"Processing {total} attended records (rate limited to ~40 records/sec)...")
-    
-    # Debug: Show sample data for first few records
-    if len(records) > 0:
-        with st.expander("🔍 Debug Information", expanded=False):
-            for i in range(min(3, len(records))):
-                sample_record = normalize_record(records[i])
-                webinar_date = sample_record.get('Webinar Date', '')
-                st.text(f"Record {i+1}: Webinar Date='{webinar_date}' (stored in eventData.WebinarDate)")
-    
-    for idx, raw in enumerate(records, start=1):
-        record = normalize_record(raw)
-        user_payload = build_user_payload(record)
-        user_ok, user_msg, user_status = client.upsert_user(user_payload)
-        if not user_ok:
-            summary["user_failures"].append(
-                {
-                    "row": idx,
-                    "user_id": record.get("UserID"),
-                    "message": user_msg,
-                    "status": user_status,
-                }
-            )
 
-        event_payload = build_attendee_event_payload(record, event_name, extra_attrs)
-        event_ok, event_msg, event_status = client.fire_event(event_payload)
-        if event_ok:
-            summary["success"] += 1
-        else:
-            # Enhanced error reporting for debugging
-            error_detail = {
-                "row": idx,
-                "user_id": record.get("UserID"),
-                "message": event_msg,
-                "status": event_status,
-            }
-            # Add sample payload for first few failures to help debug
-            if len(summary["event_failures"]) < 3:
-                error_detail["webinar_date"] = record.get("Webinar Date", "")
-                error_detail["event_payload_keys"] = list(event_payload.keys())  # Show structure
-            summary["event_failures"].append(error_detail)
-        progress.progress(idx / total)
-        
-        # Update status every 10 records
-        if idx % 10 == 0 or idx == total:
-            status_text.text(f"Processed {idx}/{total} records... Success: {summary['success']}, Failures: {len(summary['event_failures'])}")
+    if use_bulk:
+        status_text.text(f"Bulk processing {total} attended records (batch={batch_size})...")
+        # Prebuild payloads
+        users = [build_user_payload(normalize_record(r)) for r in records]
+        events = [build_attendee_event_payload(normalize_record(r), event_name, extra_attrs) for r in records]
+        i = 0
+        dyn_batch = max(5, int(batch_size))
+        while i < total:
+            end = min(i + dyn_batch, total)
+            u_batch = users[i:end]
+            e_batch = events[i:end]
+            u_ok, u_msg, u_status = client.bulk_upsert_users(u_batch)
+            if not u_ok:
+                if u_status == 429 and dyn_batch > 5:
+                    dyn_batch = max(5, dyn_batch // 2)
+                    status_text.text(f"429 on users; reducing batch to {dyn_batch} and retrying after backoff...")
+                    time.sleep(5)
+                    continue
+                # fallback per-row for this slice
+                for j, r in enumerate(records[i:end], start=i+1):
+                    ok, msg, stc = client.upsert_user(build_user_payload(normalize_record(r)))
+                    if not ok:
+                        summary["user_failures"].append({"row": j, "user_id": r.get("UserID"), "message": msg, "status": stc})
+            ev_ok, ev_msg, ev_status = client.bulk_fire_events(e_batch)
+            if ev_ok:
+                summary["success"] += len(e_batch)
+            else:
+                if ev_status == 429 and dyn_batch > 5:
+                    dyn_batch = max(5, dyn_batch // 2)
+                    status_text.text(f"429 on events; reducing batch to {dyn_batch} and retrying after backoff...")
+                    time.sleep(5)
+                    continue
+                # fallback per-row to capture failures
+                for j, r in enumerate(records[i:end], start=i+1):
+                    payload = build_attendee_event_payload(normalize_record(r), event_name, extra_attrs)
+                    ok, msg, stc = client.fire_event(payload)
+                    if ok:
+                        summary["success"] += 1
+                    else:
+                        err = {"row": j, "user_id": r.get("UserID"), "message": msg, "status": stc}
+                        if len(summary["event_failures"]) < 3:
+                            err["webinar_date"] = r.get("Webinar Date", "")
+                            err["event_payload_keys"] = list(payload.keys())
+                        summary["event_failures"].append(err)
+            i = end
+            progress.progress(i / total)
+            if i % max(10, dyn_batch) == 0 or i == total:
+                status_text.text(f"Processed {i}/{total} records... Success: {summary['success']}, Failures: {len(summary['event_failures'])} (batch={dyn_batch})")
+        # Final cool-down retry for 429s
+        if final_retry:
+            pend = [f for f in summary["event_failures"] if f.get("status") == 429]
+            if pend:
+                time.sleep(10)
+                still: List[Dict[str, object]] = []
+                for f in pend:
+                    idx = int(f.get("row", 0)) - 1
+                    payload = build_attendee_event_payload(normalize_record(records[idx]), event_name, extra_attrs)
+                    ok, msg, stc = client.fire_event(payload)
+                    if ok:
+                        summary["success"] += 1
+                    else:
+                        still.append({"row": f["row"], "user_id": f.get("user_id"), "message": msg, "status": stc})
+                # replace only 429 subset with remaining
+                summary["event_failures"] = [f for f in summary["event_failures"] if f.get("status") != 429] + still
+    else:
+        # Process records with rate limiting (80 req/sec = 4800/min)
+        status_text.text(f"Processing {total} attended records (rate limited to ~40 records/sec)...")
+        # Debug
+        if len(records) > 0:
+            with st.expander("🔍 Debug Information", expanded=False):
+                for k in range(min(3, len(records))):
+                    smp = normalize_record(records[k])
+                    st.text(f"Record {k+1}: Webinar Date='{smp.get('Webinar Date','')}' (stored in eventData.WebinarDate)")
+        for idx, raw in enumerate(records, start=1):
+            record = normalize_record(raw)
+            user_payload = build_user_payload(record)
+            user_ok, user_msg, user_status = client.upsert_user(user_payload)
+            if not user_ok:
+                summary["user_failures"].append({"row": idx, "user_id": record.get("UserID"), "message": user_msg, "status": user_status})
+            event_payload = build_attendee_event_payload(record, event_name, extra_attrs)
+            event_ok, event_msg, event_status = client.fire_event(event_payload)
+            if event_ok:
+                summary["success"] += 1
+            else:
+                error_detail = {"row": idx, "user_id": record.get("UserID"), "message": event_msg, "status": event_status}
+                if len(summary["event_failures"]) < 3:
+                    error_detail["webinar_date"] = record.get("Webinar Date", "")
+                    error_detail["event_payload_keys"] = list(event_payload.keys())
+                summary["event_failures"].append(error_detail)
+            progress.progress(idx / total)
+            if idx % 10 == 0 or idx == total:
+                status_text.text(f"Processed {idx}/{total} records... Success: {summary['success']}, Failures: {len(summary['event_failures'])}")
     
     progress.empty()
     status_text.empty()
@@ -1867,6 +1940,10 @@ def fire_registration_events(
     client: WebEngageClient,
     event_name: str,
     extra_attrs: Dict[str, str] | None = None,
+    *,
+    use_bulk: bool = False,
+    batch_size: int = 25,
+    final_retry: bool = True,
 ) -> Dict[str, object]:
     total = len(df)
     summary = {
@@ -1881,42 +1958,80 @@ def fire_registration_events(
     progress = st.progress(0)
     status_text = st.empty()
     records = df.to_dict(orient="records")
-    
-    # Process records with rate limiting
-    status_text.text(f"Processing {total} registration records (rate limited to ~40 records/sec)...")
-    
-    for idx, raw in enumerate(records, start=1):
-        record = normalize_record(raw)
-        user_payload = build_user_payload(record)
-        user_ok, user_msg, user_status = client.upsert_user(user_payload)
-        if not user_ok:
-            summary["user_failures"].append(
-                {
-                    "row": idx,
-                    "user_id": record.get("UserID"),
-                    "message": user_msg,
-                    "status": user_status,
-                }
-            )
 
-        event_payload = build_registration_event_payload(record, event_name, extra_attrs)
-        event_ok, event_msg, event_status = client.fire_event(event_payload)
-        if event_ok:
-            summary["success"] += 1
-        else:
-            summary["event_failures"].append(
-                {
-                    "row": idx,
-                    "user_id": record.get("UserID"),
-                    "message": event_msg,
-                    "status": event_status,
-                }
-            )
-        progress.progress(idx / total)
-        
-        # Update status every 10 records
-        if idx % 10 == 0 or idx == total:
-            status_text.text(f"Processed {idx}/{total} records... Success: {summary['success']}, Failures: {len(summary['event_failures'])}")
+    if use_bulk:
+        status_text.text(f"Bulk processing {total} registration records (batch={batch_size})...")
+        users = [build_user_payload(normalize_record(r)) for r in records]
+        events = [build_registration_event_payload(normalize_record(r), event_name, extra_attrs) for r in records]
+        i = 0
+        dyn_batch = max(5, int(batch_size))
+        while i < total:
+            end = min(i + dyn_batch, total)
+            u_batch = users[i:end]
+            e_batch = events[i:end]
+            u_ok, u_msg, u_status = client.bulk_upsert_users(u_batch)
+            if not u_ok:
+                if u_status == 429 and dyn_batch > 5:
+                    dyn_batch = max(5, dyn_batch // 2)
+                    status_text.text(f"429 on users; reducing batch to {dyn_batch} and retrying after backoff...")
+                    time.sleep(5)
+                    continue
+                for j, r in enumerate(records[i:end], start=i+1):
+                    ok, msg, stc = client.upsert_user(build_user_payload(normalize_record(r)))
+                    if not ok:
+                        summary["user_failures"].append({"row": j, "user_id": r.get("UserID"), "message": msg, "status": stc})
+            ev_ok, ev_msg, ev_status = client.bulk_fire_events(e_batch)
+            if ev_ok:
+                summary["success"] += len(e_batch)
+            else:
+                if ev_status == 429 and dyn_batch > 5:
+                    dyn_batch = max(5, dyn_batch // 2)
+                    status_text.text(f"429 on events; reducing batch to {dyn_batch} and retrying after backoff...")
+                    time.sleep(5)
+                    continue
+                for j, r in enumerate(records[i:end], start=i+1):
+                    payload = build_registration_event_payload(normalize_record(r), event_name, extra_attrs)
+                    ok, msg, stc = client.fire_event(payload)
+                    if ok:
+                        summary["success"] += 1
+                    else:
+                        summary["event_failures"].append({"row": j, "user_id": r.get("UserID"), "message": msg, "status": stc})
+            i = end
+            progress.progress(i / total)
+            if i % max(10, dyn_batch) == 0 or i == total:
+                status_text.text(f"Processed {i}/{total} records... Success: {summary['success']}, Failures: {len(summary['event_failures'])} (batch={dyn_batch})")
+        if final_retry:
+            pend = [f for f in summary["event_failures"] if f.get("status") == 429]
+            if pend:
+                time.sleep(10)
+                still: List[Dict[str, object]] = []
+                for f in pend:
+                    idx = int(f.get("row", 0)) - 1
+                    payload = build_registration_event_payload(normalize_record(records[idx]), event_name, extra_attrs)
+                    ok, msg, stc = client.fire_event(payload)
+                    if ok:
+                        summary["success"] += 1
+                    else:
+                        still.append({"row": f["row"], "user_id": f.get("user_id"), "message": msg, "status": stc})
+                summary["event_failures"] = [f for f in summary["event_failures"] if f.get("status") != 429] + still
+    else:
+        # Non-bulk path
+        status_text.text(f"Processing {total} registration records (rate limited to ~40 records/sec)...")
+        for idx, raw in enumerate(records, start=1):
+            record = normalize_record(raw)
+            user_payload = build_user_payload(record)
+            user_ok, user_msg, user_status = client.upsert_user(user_payload)
+            if not user_ok:
+                summary["user_failures"].append({"row": idx, "user_id": record.get("UserID"), "message": user_msg, "status": user_status})
+            event_payload = build_registration_event_payload(record, event_name, extra_attrs)
+            event_ok, event_msg, event_status = client.fire_event(event_payload)
+            if event_ok:
+                summary["success"] += 1
+            else:
+                summary["event_failures"].append({"row": idx, "user_id": record.get("UserID"), "message": event_msg, "status": event_status})
+            progress.progress(idx / total)
+            if idx % 10 == 0 or idx == total:
+                status_text.text(f"Processed {idx}/{total} records... Success: {summary['success']}, Failures: {len(summary['event_failures'])}")
     
     progress.empty()
     status_text.empty()
@@ -1931,6 +2046,10 @@ def fire_bootcamp_events(
     registration_event_name: str,
     attended_extra: Dict[str, str] | None = None,
     registration_extra: Dict[str, str] | None = None,
+    *,
+    use_bulk: bool = False,
+    batch_size: int = 25,
+    final_retry: bool = True,
 ) -> Dict[str, object]:
     total = len(df)
     summary = {
@@ -1948,67 +2067,110 @@ def fire_bootcamp_events(
     progress = st.progress(0)
     status_text = st.empty()
     records = df.to_dict(orient="records")
-    
-    # Process records with rate limiting (3 API calls per record: user + 2 events)
-    status_text.text(f"Processing {total} bootcamp records (rate limited, 3 events per record)...")
-    
-    for idx, raw in enumerate(records, start=1):
-        record = normalize_record(raw)
-        user_payload = build_user_payload(record)
-        user_ok, user_msg, user_status = client.upsert_user(user_payload)
-        if not user_ok:
-            summary["user_failures"].append(
-                {
-                    "row": idx,
-                    "user_id": record.get("UserID"),
-                    "message": user_msg,
-                    "status": user_status,
-                }
-            )
 
-        reg_payload = build_bootcamp_registration_event_payload(
-            record,
-            day_label,
-            registration_event_name,
-            registration_extra,
-        )
-        reg_ok, reg_msg, reg_status = client.fire_event(reg_payload)
-        if reg_ok:
-            summary["registration_success"] += 1
-        else:
-            summary["registration_failures"].append(
-                {
-                    "row": idx,
-                    "user_id": record.get("UserID"),
-                    "message": reg_msg,
-                    "status": reg_status,
-                }
-            )
-
-        att_payload = build_bootcamp_attended_event_payload(
-            record,
-            day_label,
-            attended_event_name,
-            attended_extra,
-        )
-        att_ok, att_msg, att_status = client.fire_event(att_payload)
-        if att_ok:
-            summary["attended_success"] += 1
-        else:
-            summary["attended_failures"].append(
-                {
-                    "row": idx,
-                    "user_id": record.get("UserID"),
-                    "message": att_msg,
-                    "status": att_status,
-                }
-            )
-
-        progress.progress(idx / total)
-        
-        # Update status every 10 records
-        if idx % 10 == 0 or idx == total:
-            status_text.text(f"Processed {idx}/{total} records... Registration success: {summary['registration_success']}, Attendance success: {summary['attended_success']}")
+    if use_bulk:
+        status_text.text(f"Bulk processing {total} bootcamp records (batch={batch_size})...")
+        users = [build_user_payload(normalize_record(r)) for r in records]
+        regs = [build_bootcamp_registration_event_payload(normalize_record(r), day_label, registration_event_name, registration_extra) for r in records]
+        atts = [build_bootcamp_attended_event_payload(normalize_record(r), day_label, attended_event_name, attended_extra) for r in records]
+        i = 0
+        dyn_batch = max(5, int(batch_size))
+        while i < total:
+            end = min(i + dyn_batch, total)
+            u_batch = users[i:end]
+            r_batch = regs[i:end]
+            a_batch = atts[i:end]
+            u_ok, u_msg, u_status = client.bulk_upsert_users(u_batch)
+            if not u_ok:
+                if u_status == 429 and dyn_batch > 5:
+                    dyn_batch = max(5, dyn_batch // 2)
+                    status_text.text(f"429 on users; reducing batch to {dyn_batch} and retrying after backoff...")
+                    time.sleep(5)
+                    continue
+                for j, r in enumerate(records[i:end], start=i+1):
+                    ok, msg, stc = client.upsert_user(build_user_payload(normalize_record(r)))
+                    if not ok:
+                        summary["user_failures"].append({"row": j, "user_id": r.get("UserID"), "message": msg, "status": stc})
+            r_ok, r_msg, r_status = client.bulk_fire_events(r_batch)
+            if not r_ok:
+                if r_status == 429 and dyn_batch > 5:
+                    dyn_batch = max(5, dyn_batch // 2)
+                    status_text.text(f"429 on registration events; reducing batch to {dyn_batch} and retrying after backoff...")
+                    time.sleep(5)
+                    continue
+                for j, r in enumerate(records[i:end], start=i+1):
+                    payload = build_bootcamp_registration_event_payload(normalize_record(r), day_label, registration_event_name, registration_extra)
+                    ok, msg, stc = client.fire_event(payload)
+                    if ok:
+                        summary["registration_success"] += 1
+                    else:
+                        summary["registration_failures"].append({"row": j, "user_id": r.get("UserID"), "message": msg, "status": stc})
+            else:
+                summary["registration_success"] += len(r_batch)
+            a_ok, a_msg, a_status = client.bulk_fire_events(a_batch)
+            if not a_ok:
+                if a_status == 429 and dyn_batch > 5:
+                    dyn_batch = max(5, dyn_batch // 2)
+                    status_text.text(f"429 on attended events; reducing batch to {dyn_batch} and retrying after backoff...")
+                    time.sleep(5)
+                    continue
+                for j, r in enumerate(records[i:end], start=i+1):
+                    payload = build_bootcamp_attended_event_payload(normalize_record(r), day_label, attended_event_name, attended_extra)
+                    ok, msg, stc = client.fire_event(payload)
+                    if ok:
+                        summary["attended_success"] += 1
+                    else:
+                        summary["attended_failures"].append({"row": j, "user_id": r.get("UserID"), "message": msg, "status": stc})
+            else:
+                summary["attended_success"] += len(a_batch)
+            i = end
+            progress.progress(i / total)
+            if i % max(10, dyn_batch) == 0 or i == total:
+                status_text.text(f"Processed {i}/{total} records... Registration success: {summary['registration_success']}, Attendance success: {summary['attended_success']} (batch={dyn_batch})")
+        if final_retry:
+            # retry 429s
+            for key, builder in [("registration_failures", lambda r: build_bootcamp_registration_event_payload(normalize_record(r), day_label, registration_event_name, registration_extra)),
+                                 ("attended_failures", lambda r: build_bootcamp_attended_event_payload(normalize_record(r), day_label, attended_event_name, attended_extra))]:
+                pend = [f for f in summary[key] if f.get("status") == 429]
+                if pend:
+                    time.sleep(10)
+                    still: List[Dict[str, object]] = []
+                    for f in pend:
+                        idx = int(f.get("row", 0)) - 1
+                        payload = builder(records[idx])
+                        ok, msg, stc = client.fire_event(payload)
+                        if ok:
+                            if key == "registration_failures":
+                                summary["registration_success"] += 1
+                            else:
+                                summary["attended_success"] += 1
+                        else:
+                            still.append({"row": f["row"], "user_id": f.get("user_id"), "message": msg, "status": stc})
+                    summary[key] = [f for f in summary[key] if f.get("status") != 429] + still
+    else:
+        # Non-bulk path
+        status_text.text(f"Processing {total} bootcamp records (rate limited, 3 events per record)...")
+        for idx, raw in enumerate(records, start=1):
+            record = normalize_record(raw)
+            user_payload = build_user_payload(record)
+            user_ok, user_msg, user_status = client.upsert_user(user_payload)
+            if not user_ok:
+                summary["user_failures"].append({"row": idx, "user_id": record.get("UserID"), "message": user_msg, "status": user_status})
+            reg_payload = build_bootcamp_registration_event_payload(record, day_label, registration_event_name, registration_extra)
+            reg_ok, reg_msg, reg_status = client.fire_event(reg_payload)
+            if reg_ok:
+                summary["registration_success"] += 1
+            else:
+                summary["registration_failures"].append({"row": idx, "user_id": record.get("UserID"), "message": reg_msg, "status": reg_status})
+            att_payload = build_bootcamp_attended_event_payload(record, day_label, attended_event_name, attended_extra)
+            att_ok, att_msg, att_status = client.fire_event(att_payload)
+            if att_ok:
+                summary["attended_success"] += 1
+            else:
+                summary["attended_failures"].append({"row": idx, "user_id": record.get("UserID"), "message": att_msg, "status": att_status})
+            progress.progress(idx / total)
+            if idx % 10 == 0 or idx == total:
+                status_text.text(f"Processed {idx}/{total} records... Registration success: {summary['registration_success']}, Attendance success: {summary['attended_success']}")
     
     progress.empty()
     status_text.empty()
