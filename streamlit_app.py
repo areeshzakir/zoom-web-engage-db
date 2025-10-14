@@ -95,10 +95,10 @@ DEFAULT_APPROVED_CONDUCTORS = [
 WEBENGAGE_HOST = "https://api.webengage.com"
 IST_TZ = timezone(timedelta(hours=5, minutes=30))
 
-PLUTUS_ATTENDEE_EVENT_NAME = "Plutus Webinar Attended"
-PLUTUS_REGISTRATION_EVENT_NAME = "Plutus Webinar Registered"
-PLUTUS_BOOTCAMP_ATTENDED_EVENT_NAME = "Plutus Bootcamp Attended"
-PLUTUS_BOOTCAMP_REGISTERED_EVENT_NAME = "Plutus Bootcamp Registered"
+PLUTUS_ATTENDEE_EVENT_NAME = "Plutus_Webinar_Attended"
+PLUTUS_REGISTRATION_EVENT_NAME = "Plutus_Webinar_Registered"
+PLUTUS_BOOTCAMP_ATTENDED_EVENT_NAME = "Plutus_Bootcamp_Attended"
+PLUTUS_BOOTCAMP_REGISTERED_EVENT_NAME = "Plutus_Bootcamp_Registered"
 
 
 PROFILE_REGISTRY = {
